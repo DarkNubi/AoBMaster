@@ -1,0 +1,313 @@
+from __future__ import annotations
+
+from dataclasses import asdict
+from pathlib import Path
+from typing import Any
+
+from . import __version__
+from .align import align_versions
+from .candidates import Candidate, generate_candidates
+from .disasm import decode_anchor_context, resync_anchor_to_insn_start
+from .errors import AoBMasterError, AoBMasterWarning, ExitCode
+from .matcher import AoBPattern, scan_ranges
+from .normalize import normalize_context
+from .output import emit_json, emit_text
+from .pe import PEFile, parse_hex_int
+from .score import (
+    ScoreBreakdown,
+    anchor_proximity,
+    compute_confidence,
+    compute_score,
+    length_regularization,
+)
+from .util import round6, sha256_file, unique_preserve_order
+
+
+def _scan_domain_ranges_for_anchor(pe: PEFile, *, domain: str, anchor_rva: int) -> list[tuple[int, bytes]]:
+    if domain == "section":
+        sec = pe.section_containing_rva(anchor_rva)
+        if not sec:
+            raise AoBMasterError(
+                ExitCode.ANCHOR_FAILURE,
+                "anchor_out_of_range",
+                "Anchor not within any section",
+                {"path": str(pe.path), "anchor_rva": hex(anchor_rva)},
+            )
+        return [(sec.raw_ptr, pe.read_fo(sec.raw_ptr, sec.raw_size))]
+    if domain == "module":
+        ranges: list[tuple[int, bytes]] = []
+        for s in pe.executable_sections():
+            ranges.append((s.raw_ptr, pe.read_fo(s.raw_ptr, s.raw_size)))
+        return ranges
+    raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown scan range: {domain}")
+
+
+def _resolve_anchor(base_pe: PEFile, args: Any) -> tuple[int, int, int]:
+    if args.anchor_rva:
+        rva = parse_hex_int(args.anchor_rva)
+    elif args.anchor_fo:
+        fo = parse_hex_int(args.anchor_fo)
+        rva = base_pe.fo_to_rva(fo)
+    elif args.anchor_va:
+        va = parse_hex_int(args.anchor_va)
+        rva = base_pe.va_to_rva(va)
+    else:
+        raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "Missing anchor")
+    fo = base_pe.rva_to_fo(rva)
+    va = base_pe.rva_to_va(rva)
+    return rva, fo, va
+
+
+def _bool_arg(s: str) -> bool:
+    if s == "true":
+        return True
+    if s == "false":
+        return False
+    raise ValueError("expected true|false")
+
+
+def run_synth(args: Any) -> int:
+    base_pe = PEFile(args.base)
+    versions = unique_preserve_order([str(p) for p in (args.versions or [])])
+    version_paths = [Path(p) for p in versions if Path(p) != args.base]
+
+    base_anchor_rva, base_anchor_fo, base_anchor_va = _resolve_anchor(base_pe, args)
+    base_section = base_pe.section_containing_rva(base_anchor_rva)
+    if not base_section:
+        raise AoBMasterError(
+            ExitCode.ANCHOR_FAILURE,
+            "anchor_out_of_range",
+            "Anchor not within any section",
+            {"anchor_rva": hex(base_anchor_rva)},
+        )
+
+    # Instruction boundary recovery is defined as part of anchor handling; do it before bytespan alignment.
+    warnings: list[AoBMasterWarning] = []
+    base_anchor_fo, w = resync_anchor_to_insn_start(base_pe, base_section, base_anchor_fo)
+    if w:
+        warnings.append(w)
+    base_anchor_rva = base_pe.fo_to_rva(base_anchor_fo)
+    base_anchor_va = base_pe.rva_to_va(base_anchor_rva)
+
+    aligned = align_versions(
+        base_pe=base_pe,
+        base_anchor_fo=base_anchor_fo,
+        base_anchor_rva=base_anchor_rva,
+        base_anchor_section=base_section,
+        version_paths=version_paths,
+        mode=args.align,
+        seed_bytes=args.seed_bytes,
+        seed_scan=args.seed_scan,
+        seed_allow_multi=_bool_arg(args.seed_allow_multi),
+    )
+
+    # After alignment, the "base" record is aligned[0] and may differ from initial FO
+    base_aligned_fo = aligned[0].anchor_fo
+    base_aligned_rva = aligned[0].anchor_rva
+    base_section = base_pe.section_containing_rva(base_aligned_rva)  # should exist
+    if not base_section:
+        raise AoBMasterError(ExitCode.ANCHOR_FAILURE, "anchor_out_of_range", "Anchor not within any section")
+
+    ctx = decode_anchor_context(
+        base_pe,
+        base_section,
+        anchor_fo=base_aligned_fo,
+        context_before=args.context_before,
+        context_after=args.context_after,
+        max_context_insns=args.max_context_insns,
+    )
+    warnings.extend(list(ctx.warnings))
+
+    norm_ctx = normalize_context(ctx.insns, profile=args.profile)
+    candidates, cand_warnings = generate_candidates(
+        norm_ctx,
+        anchor_ctx_index=ctx.anchor_index,
+        min_insns=args.min_insns,
+        max_insns=args.max_insns,
+    )
+    warnings.extend(cand_warnings)
+
+    require_unique = _bool_arg(args.require_unique)
+    require_present_all = _bool_arg(args.require_present_all)
+
+    # scan-range defaults: base=section, versions=module unless user explicitly sets --scan-range
+    scan_range_base = args.scan_range or "section"
+    scan_range_versions = args.scan_range or ("module" if version_paths else "section")
+
+    # Build PE objects for versions once.
+    pes: dict[Path, PEFile] = {args.base: base_pe}
+    for p in version_paths:
+        pes[p] = PEFile(p)
+
+    # Drift metrics for confidence
+    max_drift_rva = 0
+    had_alignment_ambiguity = any(a.seed_hits and a.seed_hits > 1 for a in aligned[1:])
+    for a in aligned[1:]:
+        if abs(a.drift_rva) > abs(max_drift_rva):
+            max_drift_rva = a.drift_rva
+
+    had_resync_warning = any(w.kind == "anchor_resynced" for w in warnings)
+
+    results: list[dict[str, Any]] = []
+
+    for c in candidates:
+        rec: dict[str, Any] = c.to_dict()
+        if c.rejected:
+            rec["valid"] = False
+            results.append(rec)
+            continue
+
+        # Scan in base and versions
+        per_file: dict[str, Any] = {}
+        base_ranges = _scan_domain_ranges_for_anchor(base_pe, domain=scan_range_base, anchor_rva=base_aligned_rva)
+        base_hits = scan_ranges(base_ranges, c.pattern)
+        per_file[str(args.base)] = {"count": len(base_hits), "hits_fo": [hex(x) for x in base_hits]}
+
+        version_present = 0
+        version_total = len(version_paths)
+        version_unique_ok = True
+        version_present_ok = True
+
+        for a in aligned[1:]:
+            pe = pes[a.path]
+            v_ranges = _scan_domain_ranges_for_anchor(pe, domain=scan_range_versions, anchor_rva=a.anchor_rva)
+            hits = scan_ranges(v_ranges, c.pattern)
+            per_file[str(a.path)] = {"count": len(hits), "hits_fo": [hex(x) for x in hits], "drift_rva": a.drift_rva}
+            if hits:
+                version_present += 1
+            else:
+                version_present_ok = False
+            if len(hits) > 1:
+                version_unique_ok = False
+
+        # Validation
+        valid = True
+        if require_unique:
+            if len(base_hits) != 1:
+                valid = False
+            if version_total and (not version_unique_ok):
+                valid = False
+            if version_total and (not version_present_ok):
+                valid = False
+        else:
+            if len(base_hits) < 1:
+                valid = False
+            if require_present_all and version_total and (not version_present_ok):
+                valid = False
+
+        rec["matches"] = per_file
+        rec["valid"] = valid
+
+        if not valid:
+            results.append(rec)
+            continue
+
+        # Score components
+        if require_unique:
+            U = 1.0
+        else:
+            U = 1.0 / float(len(base_hits)) if base_hits else 0.0
+
+        if version_total == 0:
+            P = 1.0
+        else:
+            P = version_present / float(version_total)
+
+        S = 1.0 - c.wildcard_ratio
+        L = length_regularization(c.total_bytes)
+        A = anchor_proximity(c.anchor_index, c.window_len)
+        score = compute_score(uniqueness=U, presence=P, specificity=S, length_reg=L, anchor_prox=A)
+        conf = compute_confidence(
+            num_versions=version_total,
+            max_drift_rva=max_drift_rva,
+            had_resync_warning=had_resync_warning,
+            had_alignment_ambiguity=had_alignment_ambiguity,
+        )
+        sb = ScoreBreakdown(U=U, P=P, S=S, L=L, A=A, score=score, confidence=conf)
+        rec["score"] = sb.to_dict()
+        results.append(rec)
+
+    # Rank valid results deterministically
+    def rank_key(r: dict[str, Any]) -> tuple:
+        if not r.get("valid"):
+            return (1, 0, "", 0)
+        s = r.get("score", {})
+        score = float(s.get("score", 0.0))
+        conf = float(s.get("confidence", 0.0))
+        aob = str(r.get("aob", ""))
+        byte_len = int(r.get("byte_len", 0))
+        return (0, -score, -conf, -byte_len, aob)
+
+    results.sort(key=rank_key)
+
+    out_obj: dict[str, Any] = {
+        "ok": True,
+        "version": __version__,
+        "inputs": {
+            "base": str(args.base),
+            "versions": [str(p) for p in version_paths],
+            "anchor": {
+                "anchor_rva": args.anchor_rva,
+                "anchor_fo": args.anchor_fo,
+                "anchor_va": args.anchor_va,
+            },
+            "align": {
+                "mode": args.align,
+                "seed_bytes": args.seed_bytes,
+                "seed_scan": args.seed_scan,
+                "seed_allow_multi": _bool_arg(args.seed_allow_multi),
+            },
+            "context": {
+                "before": args.context_before,
+                "after": args.context_after,
+                "max_insns": args.max_context_insns,
+            },
+            "profile": args.profile,
+            "candidate_windows": {"min_insns": args.min_insns, "max_insns": args.max_insns},
+            "scan_range": {"base": scan_range_base, "versions": scan_range_versions},
+            "validation": {"require_unique": require_unique, "require_present_all": require_present_all},
+        },
+        "hashes": {str(p): {"sha256": sha256_file(Path(p))} for p in [args.base, *version_paths]},
+        "anchor": {
+            "resolved_base": {"fo": hex(base_aligned_fo), "rva": hex(base_aligned_rva), "va": hex(base_pe.rva_to_va(base_aligned_rva))},
+            "section": base_section.name,
+        },
+        "alignment": [a.to_dict() for a in aligned],
+        "warnings": [w.to_dict() for w in warnings],
+        "errors": [],
+        "candidates": results,
+    }
+
+    if args.format == "json":
+        emit_json(out_obj)
+    elif args.format == "text":
+        lines: list[str] = []
+        lines.append("AoBMaster v1.0")
+        lines.append(f"Base: {args.base}")
+        lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section.name}")
+        lines.append("")
+
+        top = [r for r in results if r.get("valid")][:5]
+        if not top:
+            lines.append("No valid candidates.")
+        else:
+            lines.append("Top candidates:")
+            for i, r in enumerate(top, 1):
+                s = r.get("score", {})
+                lines.append(f"{i}. score={s.get('score')} conf={s.get('confidence')} bytes={r.get('byte_len')} wc={r.get('wildcard_ratio')}")
+                lines.append(f"   {r.get('aob')}")
+        emit_text(lines)
+    elif args.format == "ce":
+        module_name = Path(args.base).name
+        top = [r for r in results if r.get("valid")][:5]
+        lines: list[str] = []
+        if not top:
+            lines.append("; AoBMaster: no valid candidates")
+        for i, r in enumerate(top, 1):
+            name = f"AOB_MASTER_{i}"
+            lines.append(f"aobscanmodule({name}, {module_name}, {r.get('aob')})")
+        emit_text(lines)
+    else:
+        raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown format: {args.format}")
+
+    return int(ExitCode.SUCCESS)
