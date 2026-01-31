@@ -192,20 +192,8 @@ class SignatureDatabase:
         
         conn.commit()
     
-    def get_signature(self, signature_id: str) -> Optional[SignatureRecord]:
-        """Get signature by ID."""
-        conn = self._connect()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM signatures WHERE id = ?", (signature_id,))
-        row = cursor.fetchone()
-        
-        if not row:
-            return None
-        
-        # Get column names
-        columns = [col[0] for col in cursor.description]
-        
+    def _row_to_signature(self, row: sqlite3.Row, columns: list[str]) -> SignatureRecord:
+        """Convert a database row to SignatureRecord, handling optional columns."""
         return SignatureRecord(
             id=row["id"],
             name=row["name"],
@@ -220,6 +208,20 @@ class SignatureDatabase:
             deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
             deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
         )
+    
+    def get_signature(self, signature_id: str) -> Optional[SignatureRecord]:
+        """Get signature by ID."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM signatures WHERE id = ?", (signature_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            return None
+        
+        columns = [col[0] for col in cursor.description]
+        return self._row_to_signature(row, columns)
     
     def list_signatures(self, name_filter: Optional[str] = None) -> list[SignatureRecord]:
         """
@@ -237,27 +239,8 @@ class SignatureDatabase:
         else:
             cursor.execute("SELECT * FROM signatures ORDER BY name")
         
-        # Get column names
         columns = [col[0] for col in cursor.description]
-        
-        results = []
-        for row in cursor.fetchall():
-            results.append(SignatureRecord(
-                id=row["id"],
-                name=row["name"],
-                pattern=row["pattern"],
-                anchor_rva=row["anchor_rva"],
-                binary_hash=row["binary_hash"],
-                created_at=row["created_at"],
-                author=row["author"],
-                version_range=row["version_range"],
-                metadata=json.loads(row["metadata_json"]),
-                parent_id=row["parent_id"] if "parent_id" in columns else None,
-                deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
-                deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
-            ))
-        
-        return results
+        return [self._row_to_signature(row, columns) for row in cursor.fetchall()]
     
     def delete_signature(self, signature_id: str) -> bool:
         """
@@ -305,20 +288,7 @@ class SignatureDatabase:
             columns = [col[0] for col in cursor.description]
             children = []
             for row in cursor.fetchall():
-                child = SignatureRecord(
-                    id=row["id"],
-                    name=row["name"],
-                    pattern=row["pattern"],
-                    anchor_rva=row["anchor_rva"],
-                    binary_hash=row["binary_hash"],
-                    created_at=row["created_at"],
-                    author=row["author"],
-                    version_range=row["version_range"],
-                    metadata=json.loads(row["metadata_json"]),
-                    parent_id=row["parent_id"] if "parent_id" in columns else None,
-                    deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
-                    deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
-                )
+                child = self._row_to_signature(row, columns)
                 children.append(child)
                 # Recursive: get children of children
                 children.extend(get_children(child.id))
