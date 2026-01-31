@@ -1,3 +1,15 @@
+Metadata-Version: 2.4
+Name: aobmaster
+Version: 1.0.0
+Summary: AoBMaster v1.0: deterministic, address-anchored AoB signature synthesis for PE x64 binaries
+Author: AoBMaster
+License: Proprietary
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: iced-x86>=1.21.0
+Provides-Extra: test
+Requires-Dist: pytest>=8.0.0; extra == "test"
+
 # AoBMaster v1.0
 
 AoBMaster is a **standalone, deterministic CLI tool** that synthesizes **stable Array-of-Bytes (AoB) signatures** from a known **anchor address** in a **PE x64** binary, and optionally validates those signatures across multiple versions of the same program.

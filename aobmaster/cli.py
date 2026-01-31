@@ -41,11 +41,31 @@ def build_parser() -> argparse.ArgumentParser:
     synth.add_argument("--context-before", type=int, default=8)
     synth.add_argument("--context-after", type=int, default=8)
     synth.add_argument("--max-context-insns", type=int, default=32)
+    synth.add_argument(
+        "--context-variations",
+        choices=["off", "on"],
+        default="off",
+        help="Generate candidates with multiple context window sizes (off=single context, on=multiple variations)."
+    )
 
-    synth.add_argument("--profile", choices=["default", "strict", "aggressive"], default="default")
+    synth.add_argument(
+        "--profile",
+        choices=["minimal", "default", "strict", "balanced", "aggressive", "stack-only", "global-only", "memory-heavy"],
+        default="default",
+        help="Wildcard profile: minimal (branches only), default (balanced), strict (minimal), "
+             "balanced (default+globals), aggressive (all), stack-only (stack offsets), "
+             "global-only (RIP-relative), memory-heavy (all memory)."
+    )
 
     synth.add_argument("--min-insns", type=int, default=6)
     synth.add_argument("--max-insns", type=int, default=14)
+
+    synth.add_argument(
+        "--top-n",
+        type=int,
+        default=5,
+        help="Number of top-ranked candidates to include in text/CE output (default: 5). JSON includes all."
+    )
 
     synth.add_argument("--scan-range", choices=["section", "module"], default=None)
 

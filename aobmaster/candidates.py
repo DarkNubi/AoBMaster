@@ -40,6 +40,63 @@ def _concat_patterns(parts: list[AoBPattern]) -> AoBPattern:
     return AoBPattern(bytes_=bytes(b), mask=bytes(m))
 
 
+def calculate_pattern_similarity(pat1: AoBPattern, pat2: AoBPattern) -> float:
+    """
+    Calculate similarity between two patterns (0.0 = completely different, 1.0 = identical).
+    Compares byte-by-byte, treating wildcards as partial matches.
+    """
+    len1, len2 = pat1.length, pat2.length
+    max_len = max(len1, len2)
+    if max_len == 0:
+        return 1.0
+
+    # Compare up to the shorter length
+    min_len = min(len1, len2)
+    matches = 0.0
+
+    for i in range(min_len):
+        b1, m1 = pat1.bytes_[i], pat1.mask[i]
+        b2, m2 = pat2.bytes_[i], pat2.mask[i]
+        
+        # Both wildcards: partial match
+        if m1 == 0 and m2 == 0:
+            matches += 0.5
+        # Both fixed and same byte: full match
+        elif m1 != 0 and m2 != 0 and b1 == b2:
+            matches += 1.0
+        # One wildcard, one fixed: partial match
+        elif (m1 == 0 and m2 != 0) or (m1 != 0 and m2 == 0):
+            matches += 0.3
+        # Both fixed but different: no match
+        # else: matches += 0
+
+    return matches / max_len
+
+
+def deduplicate_candidates(candidates: list[Candidate], *, threshold: float = 0.75) -> list[Candidate]:
+    """
+    Deduplicate candidates based on pattern similarity.
+    Keep patterns that are less than `threshold` similar (default: 75%).
+    This means patterns must be >25% different to be kept.
+    """
+    if not candidates:
+        return []
+
+    unique = [candidates[0]]
+
+    for candidate in candidates[1:]:
+        is_unique = True
+        for existing in unique:
+            similarity = calculate_pattern_similarity(candidate.pattern, existing.pattern)
+            if similarity >= threshold:  # If 75% or more similar, skip
+                is_unique = False
+                break
+        if is_unique:
+            unique.append(candidate)
+
+    return unique
+
+
 def generate_candidates(
     ctx: tuple[NormalizedInsn, ...],
     *,
