@@ -258,9 +258,9 @@ class SignatureDatabase:
     
     def get_signature_family(self, signature_id: str) -> list[SignatureRecord]:
         """
-        Get entire signature family (parent chain and children).
+        Get entire signature family (parent chain, siblings, and children).
         
-        Returns list ordered: root → parent → this → children
+        Returns list ordered: root → parent → siblings → children
         """
         sig = self.get_signature(signature_id)
         if not sig:
@@ -270,31 +270,36 @@ class SignatureDatabase:
         
         # Walk up to root
         current = sig
+        root = current
         while current.parent_id:
             parent = self.get_signature(current.parent_id)
             if not parent:
                 break
             family.insert(0, parent)
+            root = parent
             current = parent
         
         # Add current signature
         family.append(sig)
         
-        # Get all children (recursive)
-        def get_children(parent_id: str) -> list[SignatureRecord]:
+        # Get all children recursively from the root (includes siblings)
+        def get_all_descendants(parent_id: str) -> list[SignatureRecord]:
             conn = self._connect()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM signatures WHERE parent_id = ?", (parent_id,))
             columns = [col[0] for col in cursor.description]
-            children = []
+            descendants = []
             for row in cursor.fetchall():
                 child = self._row_to_signature(row, columns)
-                children.append(child)
+                # Only add if not already in family (avoid duplicates)
+                if child.id != sig.id:
+                    descendants.append(child)
                 # Recursive: get children of children
-                children.extend(get_children(child.id))
-            return children
+                descendants.extend(get_all_descendants(child.id))
+            return descendants
         
-        family.extend(get_children(sig.id))
+        # Get all descendants from the root
+        family.extend(get_all_descendants(root.id))
         
         return family
     

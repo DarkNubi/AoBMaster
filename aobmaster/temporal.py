@@ -174,11 +174,14 @@ def analyze_signature_temporal(
         stability_assessment = "stable"
         recommendation = "Signature is stable. Continue monitoring."
     elif pass_rate >= 0.7:
-        stability_assessment = "fragile"  # Changed from moderately_stable for consistency
+        stability_assessment = "moderately_stable"
         recommendation = "Signature generally works but has occasional failures. Review failure patterns."
-    else:
+    elif pass_rate >= 0.5:
         stability_assessment = "fragile"
         recommendation = "Signature is fragile. Consider regenerating with different anchor or profile."
+    else:
+        stability_assessment = "unstable"
+        recommendation = "Signature is highly unstable. Regenerate immediately with different anchor or profile."
     
     return TemporalAnalysisResult(
         signature_id=signature_id,

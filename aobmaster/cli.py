@@ -168,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     db_import.add_argument("--db", type=Path, required=True, help="Database path.")
     db_import.add_argument("--input", type=Path, required=True, help="Input JSON file.")
     
+    # db deprecate
+    db_deprecate = db_sub.add_parser("deprecate", help="Deprecate a signature.")
+    db_deprecate.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_deprecate.add_argument("--signature", type=str, required=True, help="Signature ID to deprecate.")
+    db_deprecate.add_argument("--reason", type=str, required=True, help="Deprecation reason.")
+    
     # Test command (v2 feature - signature replay & regression testing)
     test = sub.add_parser("test", help="Test signatures against binary corpus (v2 feature).")
     test.add_argument("--db", type=Path, required=True, help="Database path.")

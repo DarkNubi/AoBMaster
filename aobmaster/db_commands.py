@@ -21,13 +21,12 @@ def run_db_init(args: Any) -> int:
     db_path = Path(args.db)
     
     if db_path.exists():
-        # Fail if database already exists (safety check)
-        raise AoBMasterError(
-            ExitCode.INVALID_ARGS,
-            "database_exists",
-            f"Database already exists: {db_path}",
-            {"path": str(db_path)},
-        )
+        # Idempotent: just verify the database is valid and return success
+        db = SignatureDatabase(db_path)
+        db.init_database()  # This will migrate if needed
+        db.close()
+        print(f"Database already initialized: {db_path}")
+        return 0
     
     db = SignatureDatabase(db_path)
     db.init_database()
@@ -218,6 +217,40 @@ def run_db_import(args: Any) -> int:
     return 0
 
 
+def run_db_deprecate(args: Any) -> int:
+    """Deprecate a signature."""
+    db_path = Path(args.db)
+    
+    if not db_path.exists():
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "database_not_found",
+            f"Database not found: {db_path}. Run 'db init' first.",
+            {"path": str(db_path)},
+        )
+    
+    db = SignatureDatabase(db_path)
+    db.init_database()
+    
+    # Check if signature exists
+    sig = db.get_signature(args.signature)
+    if not sig:
+        db.close()
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "signature_not_found",
+            f"Signature not found: {args.signature}",
+            {"signature_id": args.signature},
+        )
+    
+    # Deprecate the signature
+    db.deprecate_signature(args.signature, args.reason)
+    db.close()
+    
+    print(f"Signature deprecated: {args.signature}")
+    return 0
+
+
 def run_db(args: Any) -> int:
     """Route to appropriate database subcommand."""
     if args.db_cmd == "init":
@@ -232,6 +265,8 @@ def run_db(args: Any) -> int:
         return run_db_export(args)
     elif args.db_cmd == "import":
         return run_db_import(args)
+    elif args.db_cmd == "deprecate":
+        return run_db_deprecate(args)
     else:
         raise AoBMasterError(
             ExitCode.INVALID_ARGS,
