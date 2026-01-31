@@ -400,12 +400,14 @@ def run_synth(args: Any) -> int:
         top_candidates = [r for r in results if r.get("valid")]
         if top_candidates and top_candidates[0].get("insns"):
             try:
+                from .matcher import parse_ce_aob
                 top_cand = top_candidates[0]
-                # Convert top candidate to SignatureIR
+                # Convert top candidate to SignatureIR using proper parsing
+                pattern_bytes, pattern_mask = parse_ce_aob(top_cand.get("aob", ""))
                 sig_ir = convert_candidate_to_ir(
                     insns=top_cand.get("insns", []),
-                    pattern_bytes=bytes.fromhex(top_cand.get("aob", "").replace(" ", "").replace("?", "0")),
-                    pattern_mask=bytes([0xFF if b != "?" else 0x00 for b in top_cand.get("aob", "").split()]),
+                    pattern_bytes=pattern_bytes,
+                    pattern_mask=pattern_mask,
                     pattern_string=top_cand.get("aob", ""),
                     anchor_fo=base_aligned_fo,
                     anchor_rva=base_aligned_rva,

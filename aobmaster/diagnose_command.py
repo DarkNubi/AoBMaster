@@ -90,12 +90,41 @@ def run_diagnose(args: Any) -> int:
         
         # Show lineage
         lines.append("Lineage:")
+        # Calculate proper depth for each signature
+        depth_map = {}
+        for sig_item in family_with_tests:
+            sig = sig_item["signature"]
+            # Calculate depth by walking parent chain
+            depth = 0
+            current_id = sig["id"]
+            seen = set()
+            while True:
+                if current_id in seen:
+                    break  # Circular reference protection
+                seen.add(current_id)
+                # Find parent in family
+                parent_id = sig.get("parent_id")
+                if not parent_id:
+                    break
+                depth += 1
+                # Find parent sig
+                parent_found = False
+                for p_item in family_with_tests:
+                    if p_item["signature"]["id"] == parent_id:
+                        current_id = parent_id
+                        parent_found = True
+                        break
+                if not parent_found:
+                    break
+            depth_map[sig["id"]] = depth
+        
         for i, item in enumerate(family_with_tests):
             sig = item["signature"]
             marker = "  ← TARGET" if sig["id"] == signature_id else ""
             deprecated_mark = " [DEPRECATED]" if sig.get("deprecated") else ""
             
-            indent = "  " * (i + 1)
+            depth = depth_map.get(sig["id"], 0)
+            indent = "  " * depth
             lines.append(f"{indent}{i+1}. {sig['name']} ({sig['id']}){deprecated_mark}{marker}")
             lines.append(f"{indent}   Pattern: {sig['pattern']}")
             lines.append(f"{indent}   Version Range: {sig.get('version_range', 'unknown')}")

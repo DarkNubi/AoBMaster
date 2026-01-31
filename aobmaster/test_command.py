@@ -145,7 +145,8 @@ def run_test(args: Any) -> int:
         binaries = []
         for pattern in corpus_patterns:
             binaries.extend(Path().glob(pattern))
-        binaries = list(set(binaries))  # Deduplicate
+        # Deduplicate while preserving order (Python 3.7+)
+        binaries = list(dict.fromkeys(binaries))
     else:
         db.close()
         raise AoBMasterError(

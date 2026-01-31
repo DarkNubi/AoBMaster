@@ -160,10 +160,6 @@ class SignatureDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_signatures_parent ON signatures(parent_id)
             """)
-            
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_test_results_signature ON test_results(signature_id)
-            """)
     
     def save_signature(self, signature: SignatureRecord) -> None:
         """
