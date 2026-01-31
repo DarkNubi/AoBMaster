@@ -341,7 +341,7 @@ def run_synth(args: Any) -> int:
         emit_json(out_obj)
     elif args.format == "text":
         lines: list[str] = []
-        lines.append("AoBMaster v1.0")
+        lines.append("AoBMaster v1.1")
         lines.append(f"Base: {args.base}")
         lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section.name}")
         lines.append("")

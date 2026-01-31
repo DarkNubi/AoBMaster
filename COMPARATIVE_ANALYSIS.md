@@ -3,7 +3,7 @@
 **Document Version**: 1.0  
 **Date**: 2026-01-31  
 **Reviewer**: Independent Analysis  
-**Purpose**: Actionable improvement roadmap for AoBMaster v1.0
+**Purpose**: Actionable improvement roadmap for AoBMaster v1.1
 
 ---
 

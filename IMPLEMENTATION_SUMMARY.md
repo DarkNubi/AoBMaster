@@ -98,7 +98,7 @@ Successfully implemented ALL improvements recommended in the comparative analysi
 - [x] All tests passing
 - [x] No security vulnerabilities
 - [x] Clean modular architecture maintained
-- [x] Backward compatible with v1.0
+- [x] Backward compatible with v1.1
 
 ### Documentation ✅
 - [x] Comprehensive README with examples
@@ -120,7 +120,7 @@ Successfully implemented ALL improvements recommended in the comparative analysi
 
 ## Key Improvements Summary
 
-1. **Flexibility**: 8 wildcard profiles for different use cases (vs 1 in v1.0)
+1. **Flexibility**: 8 wildcard profiles for different use cases (vs 1 in earlier versions)
 2. **Coverage**: Context variations generate 6x more candidate diversity
 3. **Efficiency**: Similarity deduplication removes redundant patterns
 4. **Usability**: Smart analysis suggests best anchors automatically

@@ -1,4 +1,4 @@
-# AoBMaster v1.0
+# AoBMaster v1.1
 
 AoBMaster is a **standalone, deterministic CLI tool** that synthesizes **stable Array-of-Bytes (AoB) signatures** from a known **anchor address** in a **PE x64** binary, and optionally validates those signatures across multiple versions of the same program.
 
@@ -198,7 +198,7 @@ Each candidate receives a composite score (0.0-1.0) based on:
 - **Text**: short human summary and top-ranked candidates.
 - **CE**: `aobscanmodule(...)` lines for the top-ranked candidates.
 
-## Limitations (v1.0)
+## Limitations (v1.1)
 
 - PE x86 and x64 (PE32 (x86) and PE32+ (x64)).
 - File-based analysis only (no live processes).
