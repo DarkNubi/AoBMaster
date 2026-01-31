@@ -6,6 +6,7 @@ from typing import Any
 
 from . import __version__
 from .align import align_versions
+from .anchor_shift import generate_shifted_anchors
 from .candidates import Candidate, deduplicate_candidates, generate_candidates
 from .disasm import decode_anchor_context, resync_anchor_to_insn_start
 from .errors import AoBMasterError, AoBMasterWarning, ExitCode
@@ -108,6 +109,27 @@ def run_synth(args: Any) -> int:
     if not base_section:
         raise AoBMasterError(ExitCode.ANCHOR_FAILURE, "anchor_out_of_range", "Anchor not within any section")
 
+    # Anchor shifting: Generate alternative anchor offsets if enabled
+    anchor_shift_range = getattr(args, 'anchor_shift', 0)
+    shifted_anchors = [(base_aligned_fo, 0)]  # Default: just the original anchor
+    
+    if anchor_shift_range > 0:
+        shifted_anchors = generate_shifted_anchors(
+            base_pe,
+            base_section,
+            base_aligned_fo,
+            shift_range=anchor_shift_range,
+            max_context_insns=args.max_context_insns,
+        )
+        if len(shifted_anchors) > 1:
+            warnings.append(
+                AoBMasterWarning(
+                    kind="anchor_shift_enabled",
+                    message=f"Anchor shifting enabled: trying {len(shifted_anchors)} anchor positions (±{anchor_shift_range} instructions)",
+                    details={"shift_range": anchor_shift_range, "anchor_count": len(shifted_anchors)},
+                )
+            )
+
     # Context variations: generate candidates for multiple context windows if enabled
     context_configs = [(args.context_before, args.context_after)]
     if args.context_variations == "on":
@@ -121,28 +143,44 @@ def run_synth(args: Any) -> int:
         ])
 
     all_candidates = []
-    for ctx_before, ctx_after in context_configs:
-        ctx = decode_anchor_context(
-            base_pe,
-            base_section,
-            anchor_fo=base_aligned_fo,
-            context_before=ctx_before,
-            context_after=ctx_after,
-            max_context_insns=args.max_context_insns,
-        )
-        warnings.extend(list(ctx.warnings))
+    
+    # Try each shifted anchor
+    for shifted_fo, shift_idx in shifted_anchors:
+        # For each anchor, try all context configurations
+        for ctx_before, ctx_after in context_configs:
+            try:
+                ctx = decode_anchor_context(
+                    base_pe,
+                    base_section,
+                    anchor_fo=shifted_fo,
+                    context_before=ctx_before,
+                    context_after=ctx_after,
+                    max_context_insns=args.max_context_insns,
+                )
+            except Exception as e:
+                # If context decoding fails for a shifted anchor, skip it
+                warnings.append(
+                    AoBMasterWarning(
+                        kind="anchor_shift_decode_failed",
+                        message=f"Failed to decode context for shifted anchor (shift={shift_idx}): {e}",
+                        details={"shift": shift_idx, "anchor_fo": hex(shifted_fo)},
+                    )
+                )
+                continue
+                
+            warnings.extend(list(ctx.warnings))
 
-        norm_ctx = normalize_context(ctx.insns, profile=args.profile)
-        candidates, cand_warnings = generate_candidates(
-            norm_ctx,
-            anchor_ctx_index=ctx.anchor_index,
-            min_insns=args.min_insns,
-            max_insns=args.max_insns,
-        )
-        warnings.extend(cand_warnings)
-        all_candidates.extend(candidates)
+            norm_ctx = normalize_context(ctx.insns, profile=args.profile)
+            candidates, cand_warnings = generate_candidates(
+                norm_ctx,
+                anchor_ctx_index=ctx.anchor_index,
+                min_insns=args.min_insns,
+                max_insns=args.max_insns,
+            )
+            warnings.extend(cand_warnings)
+            all_candidates.extend(candidates)
 
-    # Use all_candidates from context variations
+    # Use all_candidates from context variations and anchor shifting
     candidates = all_candidates
 
     # Apply similarity-based deduplication to remove near-duplicate patterns
