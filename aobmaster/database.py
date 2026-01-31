@@ -203,6 +203,9 @@ class SignatureDatabase:
         if not row:
             return None
         
+        # Get column names
+        columns = [col[0] for col in cursor.description]
+        
         return SignatureRecord(
             id=row["id"],
             name=row["name"],
@@ -213,9 +216,9 @@ class SignatureDatabase:
             author=row["author"],
             version_range=row["version_range"],
             metadata=json.loads(row["metadata_json"]),
-            parent_id=row.get("parent_id"),
-            deprecated=bool(row.get("deprecated", 0)),
-            deprecation_reason=row.get("deprecation_reason"),
+            parent_id=row["parent_id"] if "parent_id" in columns else None,
+            deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
+            deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
         )
     
     def list_signatures(self, name_filter: Optional[str] = None) -> list[SignatureRecord]:
@@ -234,6 +237,9 @@ class SignatureDatabase:
         else:
             cursor.execute("SELECT * FROM signatures ORDER BY name")
         
+        # Get column names
+        columns = [col[0] for col in cursor.description]
+        
         results = []
         for row in cursor.fetchall():
             results.append(SignatureRecord(
@@ -246,9 +252,9 @@ class SignatureDatabase:
                 author=row["author"],
                 version_range=row["version_range"],
                 metadata=json.loads(row["metadata_json"]),
-                parent_id=row.get("parent_id"),
-                deprecated=bool(row.get("deprecated", 0)),
-                deprecation_reason=row.get("deprecation_reason"),
+                parent_id=row["parent_id"] if "parent_id" in columns else None,
+                deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
+                deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
             ))
         
         return results
@@ -296,6 +302,7 @@ class SignatureDatabase:
             conn = self._connect()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM signatures WHERE parent_id = ?", (parent_id,))
+            columns = [col[0] for col in cursor.description]
             children = []
             for row in cursor.fetchall():
                 child = SignatureRecord(
@@ -308,9 +315,9 @@ class SignatureDatabase:
                     author=row["author"],
                     version_range=row["version_range"],
                     metadata=json.loads(row["metadata_json"]),
-                    parent_id=row.get("parent_id"),
-                    deprecated=bool(row.get("deprecated", 0)),
-                    deprecation_reason=row.get("deprecation_reason"),
+                    parent_id=row["parent_id"] if "parent_id" in columns else None,
+                    deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
+                    deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
                 )
                 children.append(child)
                 # Recursive: get children of children
