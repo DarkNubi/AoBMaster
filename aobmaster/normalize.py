@@ -115,8 +115,8 @@ def normalize_instruction(di: DecodedInsn, *, profile: str) -> AoBPattern:
                     mask[i] = 0
 
     # Displacements (RIP-relative and [reg+disp] / [reg+index*scale+disp])
-    memory_displ_size = insn.memory_displ_size
-    if memory_displ_size > 0:
+    memory_displacement_size = insn.memory_displ_size
+    if memory_displacement_size > 0:
         # For x86-64, RIP-relative always uses disp32 (4 bytes), even though the address is 64-bit
         # Calculate displacement offset: it comes after opcode, prefixes, ModRM, and optionally SIB
         # For RIP-relative: the displacement is typically 4 bytes in the encoding
@@ -129,16 +129,18 @@ def normalize_instruction(di: DecodedInsn, *, profile: str) -> AoBPattern:
         else:
             # For other memory operands, displacement can be 0, 1, 2, or 4 bytes
             # We need to check the actual encoding
-            # If memory_displ_size is set, we have a displacement
+            # If memory_displacement_size is set, we have a displacement
             # Typical sizes: disp8 (1), disp16 (2), disp32 (4)
             # For 64-bit mode, most often disp8 or disp32
-            encoded_disp_size = min(memory_displ_size, 4)
+            encoded_disp_size = min(memory_displacement_size, 4)
             if encoded_disp_size == 3:
                 encoded_disp_size = 4  # No 3-byte displacements
             elif encoded_disp_size > 4:
                 encoded_disp_size = 4  # Max disp32 in encoding
         
-        # Calculate offset: displacement comes before any immediates
+        # Calculate offset: displacement comes before any immediates in most x86 encodings
+        # NOTE: This is a heuristic. X86 encoding is complex and varies by instruction.
+        # For most common instructions (MOV, LEA, etc.), displacement comes before immediate.
         imm_total = sum(size for _, size in _get_immediate_info(insn))
         disp_off = insn.len - encoded_disp_size - imm_total
         

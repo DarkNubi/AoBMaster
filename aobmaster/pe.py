@@ -206,11 +206,12 @@ def _parse_pe(data: bytes, *, path: Path) -> PEInfo:
     entry_point_rva = _read_u32(data, opt + 16)
     
     if is_64bit:
-        # PE32+ (64-bit)
+        # PE32+ (64-bit): ImageBase is at offset 24 and is 8 bytes (QWORD)
         image_base = _read_u64(data, opt + 24)
         size_of_image = _read_u32(data, opt + 56)
     else:
-        # PE32 (32-bit)
+        # PE32 (32-bit): ImageBase is at offset 28 and is 4 bytes (DWORD)
+        # Offset differs from PE32+ because BaseOfData field (4 bytes) exists only in PE32
         image_base = _read_u32(data, opt + 28)
         size_of_image = _read_u32(data, opt + 56)
 
