@@ -353,6 +353,7 @@ class SignatureDatabase:
         for row in cursor.fetchall():
             results.append({
                 "id": row["id"],
+                "signature_id": row["signature_id"],
                 "binary_path": row["binary_path"],
                 "binary_hash": row["binary_hash"],
                 "test_date": row["test_date"],

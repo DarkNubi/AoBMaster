@@ -176,6 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     test.add_argument("--corpus", type=str, nargs="+", help="Test against corpus (glob patterns).")
     test.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1).")
     test.add_argument("--record", action="store_true", help="Record results in database.")
+    test.add_argument("--allow-multiple", action="store_true", help="Allow multiple matches per signature (default: expect unique match).")
     _add_common_output_args(test)
     
     # Analyze command (v2 feature - temporal analysis)
