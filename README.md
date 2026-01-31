@@ -200,7 +200,7 @@ Each candidate receives a composite score (0.0-1.0) based on:
 
 ## Limitations (v1.0)
 
-- PE **x64 only** (PE32+ / AMD64).
+- PE x86 and x64 (PE32 (x86) and PE32+ (x64)).
 - File-based analysis only (no live processes).
 - No patching or binary modification.
 
