@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 
 # Database schema version for migrations
-DB_SCHEMA_VERSION = 2
+DB_SCHEMA_VERSION = 3  # v2.1 Phase 4: Performance indexes
 
 
 @dataclass
@@ -160,6 +160,35 @@ class SignatureDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_signatures_parent ON signatures(parent_id)
             """)
+        
+        if from_version < 3:
+            # Schema version 3: Performance indexes (v2.1 Phase 4)
+            # Add indexes for common query patterns
+            
+            # Check if test_results table exists before adding indexes
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='test_results'
+            """)
+            if cursor.fetchone():
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_test_results_timestamp 
+                    ON test_results(test_date)
+                """)
+                
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_test_results_passed 
+                    ON test_results(passed)
+                """)
+            
+            # Covering index for list queries (improves query performance)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signatures_list 
+                ON signatures(name, created_at, id)
+            """)
+            
+            # Optimize database after adding indexes
+            cursor.execute("PRAGMA optimize")
     
     def save_signature(self, signature: SignatureRecord) -> None:
         """
