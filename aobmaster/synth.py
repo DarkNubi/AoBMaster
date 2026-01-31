@@ -182,13 +182,15 @@ def run_synth(args: Any) -> int:
     for aligned_anchor in aligned:
         if aligned_anchor.path != str(args.base):
             drift = aligned_anchor.anchor_rva - base_anchor_rva
+            # Determine ambiguity: seed_hits > 1 means multiple matches (ambiguous)
+            ambiguity = aligned_anchor.seed_hits is not None and aligned_anchor.seed_hits > 1
             trace.add(AlignmentEvent(
                 mode=args.align,
                 base_rva=base_anchor_rva,
                 version_path=str(aligned_anchor.path),
                 aligned_rva=aligned_anchor.anchor_rva,
                 drift=drift,
-                ambiguity=aligned_anchor.ambiguity,
+                ambiguity=ambiguity,
             ))
 
     # After alignment, the "base" record is aligned[0] and may differ from initial FO
@@ -374,7 +376,7 @@ def run_synth(args: Any) -> int:
         
         # Trace scoring event
         trace.add(ScoringEvent(
-            candidate_pattern=c.aob_string,
+            candidate_pattern=c.pattern.to_ce_string(),
             uniqueness=U,
             presence=P,
             specificity=S,
