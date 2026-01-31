@@ -10,6 +10,7 @@ from .anchor_shift import generate_shifted_anchors
 from .candidates import Candidate, deduplicate_candidates, generate_candidates
 from .disasm import decode_anchor_context, resync_anchor_to_insn_start
 from .errors import AoBMasterError, AoBMasterWarning, ExitCode
+from .ir_bridge import convert_candidate_to_ir, format_explain_output
 from .matcher import AoBPattern, scan_ranges
 from .normalize import normalize_context
 from .output import emit_json, emit_text
@@ -20,6 +21,13 @@ from .score import (
     compute_confidence,
     compute_score,
     length_regularization,
+)
+from .trace import (
+    AlignmentEvent,
+    AnchorResolutionEvent,
+    AnchorResyncEvent,
+    ScoringEvent,
+    TraceCollector,
 )
 from .util import round6, sha256_file, unique_preserve_order
 
@@ -68,11 +76,71 @@ def _bool_arg(s: str) -> bool:
 
 
 def run_synth(args: Any) -> int:
+    # Initialize trace collector (v2 feature, opt-in)
+    trace = TraceCollector(enabled=getattr(args, 'explain', False))
+    
     base_pe = PEFile(args.base)
     versions = unique_preserve_order([str(p) for p in (args.versions or [])])
     version_paths = [Path(p) for p in versions if Path(p) != args.base]
 
     base_anchor_rva, base_anchor_fo, base_anchor_va = _resolve_anchor(base_pe, args)
+    
+    # Phase 6 (v2): Structural anchor resolution (OPT-IN, HIGH RISK)
+    structural_context = None
+    anchor_mode = getattr(args, 'anchor_mode', 'byte-offset')
+    
+    if anchor_mode == 'structural':
+        # Import here to avoid dependency when not using structural mode
+        from .structural import (
+            resolve_structural_anchor,
+            validate_structural_anchor,
+            get_structural_context
+        )
+        
+        structural_context = get_structural_context(base_pe, base_anchor_rva)
+        
+        # If explain mode, add structural context to trace
+        if trace.enabled:
+            trace.add({
+                "type": "structural_anchor_resolution",
+                "function_detected": structural_context["function_detected"],
+                "function_start_rva": hex(structural_context["function_start_rva"]) if structural_context["function_start_rva"] else None,
+                "prologue_pattern": structural_context["prologue_pattern"],
+                "offset_from_start": structural_context["offset_from_start"],
+                "confidence": structural_context["confidence"],
+                "anchor_type": structural_context.get("anchor_type", "unknown"),
+                "warnings": structural_context["warnings"]
+            })
+        
+        # Validate structural anchor
+        min_confidence = getattr(args, 'structural_min_confidence', 0.60)
+        if structural_context["confidence"] < min_confidence:
+            raise AoBMasterError(
+                ExitCode.ANCHOR_FAILURE,
+                "structural_anchor_low_confidence",
+                f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {min_confidence:.2f}. "
+                f"Use --anchor-mode byte-offset to fallback to v1.x behavior, or lower --structural-min-confidence.",
+                {
+                    "confidence": structural_context["confidence"],
+                    "min_confidence": min_confidence,
+                    "warnings": structural_context["warnings"]
+                }
+            )
+        
+        if structural_context["warnings"]:
+            for warning_msg in structural_context["warnings"]:
+                warnings.append(AoBMasterWarning("structural_anchor_warning", warning_msg, {}))
+    
+    # Trace anchor resolution
+    trace.add(AnchorResolutionEvent(
+        input_rva=parse_hex_int(args.anchor_rva) if args.anchor_rva else None,
+        input_fo=parse_hex_int(args.anchor_fo) if args.anchor_fo else None,
+        input_va=parse_hex_int(args.anchor_va) if args.anchor_va else None,
+        resolved_fo=base_anchor_fo,
+        resolved_rva=base_anchor_rva,
+        section=base_pe.section_containing_rva(base_anchor_rva).name if base_pe.section_containing_rva(base_anchor_rva) else "unknown",
+    ))
+    
     base_section = base_pe.section_containing_rva(base_anchor_rva)
     if not base_section:
         raise AoBMasterError(
@@ -84,9 +152,17 @@ def run_synth(args: Any) -> int:
 
     # Instruction boundary recovery is defined as part of anchor handling; do it before bytespan alignment.
     warnings: list[AoBMasterWarning] = []
+    original_fo = base_anchor_fo
     base_anchor_fo, w = resync_anchor_to_insn_start(base_pe, base_section, base_anchor_fo)
     if w:
         warnings.append(w)
+        # Trace resync event
+        trace.add(AnchorResyncEvent(
+            original_fo=original_fo,
+            resynced_fo=base_anchor_fo,
+            backtrack_bytes=original_fo - base_anchor_fo,
+            instruction_asm="(instruction at resynced offset)",
+        ))
     base_anchor_rva = base_pe.fo_to_rva(base_anchor_fo)
     base_anchor_va = base_pe.rva_to_va(base_anchor_rva)
 
@@ -101,6 +177,19 @@ def run_synth(args: Any) -> int:
         seed_scan=args.seed_scan,
         seed_allow_multi=_bool_arg(args.seed_allow_multi),
     )
+    
+    # Trace alignment events
+    for aligned_anchor in aligned:
+        if aligned_anchor.path != str(args.base):
+            drift = aligned_anchor.anchor_rva - base_anchor_rva
+            trace.add(AlignmentEvent(
+                mode=args.align,
+                base_rva=base_anchor_rva,
+                version_path=str(aligned_anchor.path),
+                aligned_rva=aligned_anchor.anchor_rva,
+                drift=drift,
+                ambiguity=aligned_anchor.ambiguity,
+            ))
 
     # After alignment, the "base" record is aligned[0] and may differ from initial FO
     base_aligned_fo = aligned[0].anchor_fo
@@ -282,6 +371,19 @@ def run_synth(args: Any) -> int:
             had_resync_warning=had_resync_warning,
             had_alignment_ambiguity=had_alignment_ambiguity,
         )
+        
+        # Trace scoring event
+        trace.add(ScoringEvent(
+            candidate_pattern=c.aob_string,
+            uniqueness=U,
+            presence=P,
+            specificity=S,
+            length_reg=L,
+            anchor_prox=A,
+            final_score=score,
+            confidence=conf,
+        ))
+        
         sb = ScoreBreakdown(U=U, P=P, S=S, L=L, A=A, score=score, confidence=conf)
         rec["score"] = sb.to_dict()
         results.append(rec)
@@ -309,6 +411,7 @@ def run_synth(args: Any) -> int:
                 "anchor_rva": args.anchor_rva,
                 "anchor_fo": args.anchor_fo,
                 "anchor_va": args.anchor_va,
+                "anchor_mode": anchor_mode,  # v2 Phase 6
             },
             "align": {
                 "mode": args.align,
@@ -336,27 +439,71 @@ def run_synth(args: Any) -> int:
         "errors": [],
         "candidates": results,
     }
+    
+    # Add structural context if structural mode was used (v2 Phase 6)
+    if structural_context:
+        out_obj["structural_anchor"] = structural_context
+    
+    # Add trace data if explain mode is enabled (v2 feature)
+    if trace.enabled:
+        out_obj["trace"] = trace.to_dict()
+        # Add SignatureIR for top candidate if available
+        top_candidates = [r for r in results if r.get("valid")]
+        if top_candidates and top_candidates[0].get("insns"):
+            try:
+                from .matcher import parse_ce_aob
+                top_cand = top_candidates[0]
+                # Convert top candidate to SignatureIR using proper parsing
+                pattern_bytes, pattern_mask = parse_ce_aob(top_cand.get("aob", ""))
+                sig_ir = convert_candidate_to_ir(
+                    insns=top_cand.get("insns", []),
+                    pattern_bytes=pattern_bytes,
+                    pattern_mask=pattern_mask,
+                    pattern_string=top_cand.get("aob", ""),
+                    anchor_fo=base_aligned_fo,
+                    anchor_rva=base_aligned_rva,
+                    profile=args.profile,
+                    section_name=base_section.name,
+                )
+                out_obj["signature_ir"] = sig_ir.to_dict()
+            except Exception:
+                # Silently skip IR conversion if it fails (best-effort)
+                pass
 
     if args.format == "json":
         emit_json(out_obj)
     elif args.format == "text":
-        lines: list[str] = []
-        lines.append("AoBMaster v1.0")
-        lines.append(f"Base: {args.base}")
-        lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section.name}")
-        lines.append("")
-
-        top_n = max(1, args.top_n if hasattr(args, 'top_n') else 5)
-        top = [r for r in results if r.get("valid")][:top_n]
-        if not top:
-            lines.append("No valid candidates.")
+        # Check if explain mode is enabled
+        if trace.enabled:
+            # Output explain format instead of normal text
+            sig_ir = out_obj.get("signature_ir")
+            if sig_ir:
+                from .signature_ir import SignatureIR
+                # Reconstruct SignatureIR from dict (simplified)
+                sig_ir_obj = None  # Would need full reconstruction
+            else:
+                sig_ir_obj = None
+            explain_lines = format_explain_output(trace.get_events(), sig_ir_obj)
+            emit_text(explain_lines)
         else:
-            lines.append(f"Top {len(top)} candidates:")
-            for i, r in enumerate(top, 1):
-                s = r.get("score", {})
-                lines.append(f"{i}. score={s.get('score')} conf={s.get('confidence')} bytes={r.get('byte_len')} wc={r.get('wildcard_ratio')}")
-                lines.append(f"   {r.get('aob')}")
-        emit_text(lines)
+            # Normal text output
+            lines: list[str] = []
+            lines.append("AoBMaster v1.1")
+            lines.append(f"Base: {args.base}")
+            lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section.name}")
+            lines.append("")
+
+            top_n = max(1, args.top_n if hasattr(args, 'top_n') else 5)
+            top = [r for r in results if r.get("valid")][:top_n]
+            if not top:
+                lines.append("No valid candidates.")
+            else:
+                lines.append(f"Top {len(top)} candidates:")
+                for i, r in enumerate(top, 1):
+                    s = r.get("score", {})
+                    lines.append(f"{i}. score={s.get('score')} conf={s.get('confidence')} bytes={r.get('byte_len')} wc={r.get('wildcard_ratio')}")
+                    lines.append(f"   {r.get('aob')}")
+            emit_text(lines)
     elif args.format == "ce":
         module_name = Path(args.base).name
         top_n = max(1, args.top_n if hasattr(args, 'top_n') else 5)

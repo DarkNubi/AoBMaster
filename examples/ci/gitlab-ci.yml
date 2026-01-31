@@ -1,0 +1,92 @@
+# GitLab CI Example: AoBMaster Signature Testing
+
+stages:
+  - test
+  - analyze
+  - report
+
+variables:
+  DB_PATH: "signatures.db"
+  CORPUS_PATH: "binaries/*.exe"
+
+test_signatures:
+  stage: test
+  image: python:3.10
+  before_script:
+    - pip install aobmaster
+  script:
+    - echo "Testing signatures against corpus..."
+    - |
+      aobmaster test \
+        --db $DB_PATH \
+        --corpus "$CORPUS_PATH" \
+        --parallel 4 \
+        --record \
+        --format json > test_results.json
+    - |
+      FAILED=$(jq '.summary.failed' test_results.json)
+      if [ "$FAILED" -gt 0 ]; then
+        echo "ERROR: $FAILED signature(s) failed"
+        jq '.results[] | select(.passed == false)' test_results.json
+        exit 1
+      fi
+  artifacts:
+    paths:
+      - test_results.json
+    reports:
+      junit: test_results.json  # Convert to JUnit format if needed
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+analyze_temporal_trends:
+  stage: analyze
+  image: python:3.10
+  before_script:
+    - pip install aobmaster
+  script:
+    - echo "Analyzing signature stability..."
+    - |
+      aobmaster analyze \
+        --db $DB_PATH \
+        --format json > analysis.json
+    - |
+      echo "Stability Summary:"
+      jq -r '.[] | "\(.signature_id): \(.stability_assessment)"' analysis.json
+    - |
+      # Check for fragile signatures
+      FRAGILE=$(jq '[.[] | select(.stability_assessment == "fragile")] | length' analysis.json)
+      if [ "$FRAGILE" -gt 5 ]; then
+        echo "WARNING: $FRAGILE fragile signature(s) detected"
+      fi
+  artifacts:
+    paths:
+      - analysis.json
+    expire_in: 30 days
+  only:
+    - schedules
+
+generate_report:
+  stage: report
+  image: python:3.10
+  script:
+    - echo "Generating HTML report..."
+    - |
+      cat > report.html <<EOF
+      <!DOCTYPE html>
+      <html>
+      <head><title>Signature Test Report</title></head>
+      <body>
+        <h1>AoBMaster Signature Test Report</h1>
+        <pre>$(cat test_results.json | jq .)</pre>
+      </body>
+      </html>
+      EOF
+  artifacts:
+    paths:
+      - report.html
+    expire_in: 90 days
+  dependencies:
+    - test_signatures
+  when: always

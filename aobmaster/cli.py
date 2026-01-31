@@ -9,6 +9,10 @@ from .info import run_info
 from .scan import run_scan
 from .smart import run_smart
 from .synth import run_synth
+from .db_commands import run_db
+from .test_command import run_test
+from .analyze_command import run_analyze
+from .diagnose_command import run_diagnose
 
 
 def _add_common_output_args(p: argparse.ArgumentParser) -> None:
@@ -78,6 +82,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     synth.add_argument("--require-unique", choices=["true", "false"], default="true")
     synth.add_argument("--require-present-all", choices=["true", "false"], default="true")
+    
+    synth.add_argument(
+        "--explain",
+        action="store_true",
+        help="Enable explainability mode: output detailed trace of all decisions (v2 feature)."
+    )
+    
+    synth.add_argument(
+        "--anchor-mode",
+        choices=["byte-offset", "structural"],
+        default="byte-offset",
+        help="Anchor resolution mode (v2 Phase 6 feature - HIGH RISK): "
+             "byte-offset (v1.x behavior, default) or structural (function-relative anchoring). "
+             "Structural mode uses heuristics and may fail - requires manual validation."
+    )
+    
+    synth.add_argument(
+        "--structural-min-confidence",
+        type=float,
+        default=0.60,
+        help="Minimum confidence for structural anchor detection (0.0-1.0, default 0.60). "
+             "Only used with --anchor-mode structural."
+    )
 
     _add_common_output_args(synth)
 
@@ -99,6 +126,69 @@ def build_parser() -> argparse.ArgumentParser:
     info = sub.add_parser("info", help="Display basic PE x64 metadata.")
     info.add_argument("--file", type=Path, required=True, help="PE x64 binary.")
     _add_common_output_args(info)
+    
+    # Database commands (v2 feature)
+    db = sub.add_parser("db", help="Manage signature database (v2 feature).")
+    db_sub = db.add_subparsers(dest="db_cmd", required=True)
+    
+    # db init
+    db_init = db_sub.add_parser("init", help="Initialize signature database.")
+    db_init.add_argument("--db", type=Path, required=True, help="Database path (e.g., signatures.db).")
+    
+    # db save
+    db_save = db_sub.add_parser("save", help="Save signature to database.")
+    db_save.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_save.add_argument("--id", type=str, required=True, help="Signature ID.")
+    db_save.add_argument("--name", type=str, required=True, help="Signature name.")
+    db_save.add_argument("--pattern", type=str, required=True, help="AoB pattern.")
+    db_save.add_argument("--anchor-rva", type=str, required=True, help="Anchor RVA (hex).")
+    db_save.add_argument("--binary-hash", type=str, required=True, help="SHA256 hash of binary.")
+    db_save.add_argument("--author", type=str, help="Author name.")
+    db_save.add_argument("--version-range", type=str, help="Version range (e.g., 1.0-1.5).")
+    
+    # db list
+    db_list = db_sub.add_parser("list", help="List signatures in database.")
+    db_list.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_list.add_argument("--filter", type=str, help="Filter by name substring.")
+    _add_common_output_args(db_list)
+    
+    # db query
+    db_query = db_sub.add_parser("query", help="Query signature by ID.")
+    db_query.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_query.add_argument("--id", type=str, required=True, help="Signature ID.")
+    _add_common_output_args(db_query)
+    
+    # db export
+    db_export = db_sub.add_parser("export", help="Export database to JSON.")
+    db_export.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_export.add_argument("--output", type=Path, required=True, help="Output JSON file.")
+    
+    # db import
+    db_import = db_sub.add_parser("import", help="Import signatures from JSON.")
+    db_import.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_import.add_argument("--input", type=Path, required=True, help="Input JSON file.")
+    
+    # Test command (v2 feature - signature replay & regression testing)
+    test = sub.add_parser("test", help="Test signatures against binary corpus (v2 feature).")
+    test.add_argument("--db", type=Path, required=True, help="Database path.")
+    test.add_argument("--signature-id", type=str, help="Test specific signature (default: all).")
+    test.add_argument("--binary", type=Path, help="Test against single binary.")
+    test.add_argument("--corpus", type=str, nargs="+", help="Test against corpus (glob patterns).")
+    test.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1).")
+    test.add_argument("--record", action="store_true", help="Record results in database.")
+    _add_common_output_args(test)
+    
+    # Analyze command (v2 feature - temporal analysis)
+    analyze = sub.add_parser("analyze", help="Analyze signature stability using historical data (v2 feature).")
+    analyze.add_argument("--db", type=Path, required=True, help="Database path.")
+    analyze.add_argument("--signature-id", type=str, help="Analyze specific signature (default: all).")
+    _add_common_output_args(analyze)
+    
+    # Diagnose command (v2 feature - signature families)
+    diagnose = sub.add_parser("diagnose", help="Diagnose signature family lineage (v2 feature).")
+    diagnose.add_argument("--db", type=Path, required=True, help="Database path.")
+    diagnose.add_argument("--signature-id", type=str, required=True, help="Signature ID to diagnose.")
+    _add_common_output_args(diagnose)
 
     return parser
 
@@ -116,6 +206,14 @@ def main(argv: list[str] | None = None) -> int:
             return run_scan(args)
         if args.cmd == "info":
             return run_info(args)
+        if args.cmd == "db":
+            return run_db(args)
+        if args.cmd == "test":
+            return run_test(args)
+        if args.cmd == "analyze":
+            return run_analyze(args)
+        if args.cmd == "diagnose":
+            return run_diagnose(args)
         raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown command: {args.cmd}")
     except AoBMasterError as e:
         # Best-effort: return machine-readable JSON if requested.

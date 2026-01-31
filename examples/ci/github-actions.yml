@@ -1,0 +1,92 @@
+# GitHub Actions Example: AoBMaster Signature Testing
+
+name: Test Signatures
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  test-signatures:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install AoBMaster
+        run: |
+          pip install aobmaster
+          # Or install from repo:
+          # pip install -e .
+      
+      - name: Download Binary Corpus
+        run: |
+          # Download binaries from artifact storage or S3
+          # Example: aws s3 sync s3://my-bucket/binaries ./binaries/
+          mkdir -p binaries
+          # Placeholder - replace with actual download logic
+      
+      - name: Test Signatures Against Corpus
+        id: test
+        run: |
+          aobmaster test \
+            --db signatures.db \
+            --corpus "binaries/*.exe" \
+            --parallel 4 \
+            --record \
+            --format json > test_results.json
+      
+      - name: Check Test Results
+        run: |
+          FAILED=$(jq '.summary.failed' test_results.json)
+          TOTAL=$(jq '.summary.total' test_results.json)
+          PASSED=$(jq '.summary.passed' test_results.json)
+          
+          echo "Test Summary:"
+          echo "  Total: $TOTAL"
+          echo "  Passed: $PASSED"
+          echo "  Failed: $FAILED"
+          
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::$FAILED signature(s) failed testing"
+            echo "Failed signatures:"
+            jq -r '.results[] | select(.passed == false) | "\(.signature_id): \(.failure_reason)"' test_results.json
+            exit 1
+          fi
+      
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: signature-test-results
+          path: test_results.json
+      
+      - name: Analyze Temporal Trends
+        if: github.event_name == 'schedule'
+        run: |
+          aobmaster analyze \
+            --db signatures.db \
+            --format json > analysis.json
+          
+          echo "Temporal Analysis:"
+          jq -r '.[] | "\(.signature_id): \(.stability_assessment) (pass rate: \(.pass_rate))"' analysis.json
+      
+      - name: Post to Slack/Discord
+        if: failure()
+        run: |
+          # Send notification on failure
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"Signature tests failed! Check GitHub Actions for details."}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}
+          echo "Notification would be sent here"
