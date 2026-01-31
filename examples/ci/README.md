@@ -171,7 +171,7 @@ For more information:
 ## Version Compatibility
 
 These examples require:
-- AoBMaster v2.1+
+- AoBMaster v2.1.0+
 - Python 3.8+
 - Access to binary corpus
 

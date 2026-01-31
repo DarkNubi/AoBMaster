@@ -130,7 +130,7 @@ def is_numpy_available() -> bool:
     return NUMPY_AVAILABLE
 
 
-def get_performance_info() -> dict[str, any]:
+def get_performance_info() -> dict[str, Any]:
     """
     Get performance optimization information.
     
