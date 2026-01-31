@@ -66,3 +66,27 @@ def write_pe(tmp_path: Path, name: str, *, text: bytes) -> Path:
     p.write_bytes(build_minimal_pe64(text=text))
     return p
 
+
+import pytest
+
+
+@pytest.fixture
+def sample_binary(tmp_path):
+    """Create a sample PE binary for testing."""
+    # Code with recognizable patterns that won't match elsewhere
+    code = (
+        b"\x48\x89\x5C\x24\x08"          # mov [rsp+8], rbx
+        b"\x48\x89\x74\x24\x10"          # mov [rsp+10], rsi
+        b"\x48\x8B\x05\x12\x34\x56\x78"  # mov rax, [rip+0x78563412]
+        b"\x85\xC0"                      # test eax, eax
+        b"\x74\x05"                      # jz +5
+        b"\xB8\x01\x00\x00\x00"          # mov eax, 1
+        b"\xC3"                          # ret
+        # Add unique padding that won't match patterns
+        b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09"
+        b"\x0A\x0B\x0C\x0D\x0E\x0F\x10\x11\x12\x13"
+        b"\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D"
+        + bytes(range(0x1E, 0x100))       # More unique padding
+    )
+    return write_pe(tmp_path, "sample.exe", text=code)
+
