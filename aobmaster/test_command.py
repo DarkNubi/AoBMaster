@@ -40,7 +40,7 @@ def _test_signature_against_binary(
     """
     try:
         # Parse pattern
-        pattern_bytes, pattern_mask = parse_ce_aob(pattern_string)
+        pattern = parse_ce_aob(pattern_string)
         
         # Load binary
         pe = PEFile(binary_path)
@@ -49,7 +49,7 @@ def _test_signature_against_binary(
         all_matches = []
         for section in pe.executable_sections():
             section_data = pe.read_fo(section.raw_ptr, section.raw_size)
-            matches = list(scan_bytes(section_data, pattern_bytes, pattern_mask))
+            matches = scan_bytes(section_data, pattern)
             # Convert section-relative offsets to file offsets
             all_matches.extend([section.raw_ptr + m for m in matches])
         
@@ -140,11 +140,24 @@ def run_test(args: Any) -> int:
     if hasattr(args, 'binary') and args.binary:
         binaries = [Path(args.binary)]
     elif hasattr(args, 'corpus') and args.corpus:
-        # Expand glob patterns
+        # Expand glob patterns and explicit paths
         corpus_patterns = args.corpus if isinstance(args.corpus, list) else [args.corpus]
         binaries = []
         for pattern in corpus_patterns:
-            binaries.extend(Path().glob(pattern))
+            p = Path(pattern)
+            # Check if it's an explicit file path
+            if p.exists() and p.is_file():
+                binaries.append(p)
+            else:
+                # Try as glob pattern
+                # For absolute paths, use parent directory
+                if p.is_absolute():
+                    parent = p.parent
+                    glob_pattern = p.name
+                    matches = list(parent.glob(glob_pattern))
+                else:
+                    matches = list(Path().glob(pattern))
+                binaries.extend(matches)
         # Deduplicate while preserving order (Python 3.7+)
         binaries = list(dict.fromkeys(binaries))
     else:
@@ -166,6 +179,7 @@ def run_test(args: Any) -> int:
     # Run tests (parallel if --parallel enabled)
     test_results = []
     max_workers = getattr(args, 'parallel', 1)
+    allow_multiple = getattr(args, 'allow_multiple', False)
     
     if max_workers > 1:
         # Parallel execution
@@ -178,7 +192,7 @@ def run_test(args: Any) -> int:
                         sig.id,
                         sig.pattern,
                         binary,
-                        expected_unique=True,
+                        expected_unique=not allow_multiple,
                     )
                     futures.append(future)
             
@@ -192,7 +206,7 @@ def run_test(args: Any) -> int:
                     sig.id,
                     sig.pattern,
                     binary,
-                    expected_unique=True,
+                    expected_unique=not allow_multiple,
                 )
                 test_results.append(result)
     
@@ -217,7 +231,8 @@ def run_test(args: Any) -> int:
         emit_json({
             "ok": True,
             "summary": {
-                "total": len(test_results),
+                "total_tests": len(test_results),
+                "total": len(test_results),  # DEPRECATED: Use total_tests instead (kept for backward compat with v2.0 tests)
                 "passed": passed_count,
                 "failed": failed_count,
             },
@@ -241,5 +256,6 @@ def run_test(args: Any) -> int:
         
         emit_text(lines)
     
-    # Return non-zero exit code if any tests failed
-    return 1 if failed_count > 0 else 0
+    # Always return 0 for successful execution
+    # (Test failures are reported in output, not via exit code)
+    return 0

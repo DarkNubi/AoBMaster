@@ -9,7 +9,6 @@ HIGH RISK MODULE: Uses heuristics. Must fail loudly. Opt-in only.
 
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
-from .disasm import disassemble
 from .pe import PEFile
 
 
@@ -86,12 +85,12 @@ def detect_function_boundary(pe: PEFile, rva: int) -> Optional[FunctionBoundary]
     Returns:
         FunctionBoundary if detected, None if not found or low confidence
     """
-    section = pe.rva_to_section(rva)
+    section = pe.section_containing_rva(rva)
     if not section or section.name not in [".text", "CODE"]:
         return None  # Only analyze code sections
     
     # Search backwards up to 1024 bytes for function start
-    search_range = min(1024, rva - section.rva)
+    search_range = min(1024, rva - section.virtual_address)
     start_rva = rva - search_range
     
     fo = pe.rva_to_fo(start_rva)

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aobmaster"
-version = "1.1.0"
-description = "AoBMaster v1.1: deterministic, address-anchored AoB signature synthesis for PE x64 binaries"
+version = "2.0.0"
+description = "AoBMaster v2.0: deterministic, address-anchored AoB signature synthesis with temporal analysis and signature management for PE x64 binaries"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }

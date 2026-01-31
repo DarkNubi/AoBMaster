@@ -168,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     db_import.add_argument("--db", type=Path, required=True, help="Database path.")
     db_import.add_argument("--input", type=Path, required=True, help="Input JSON file.")
     
+    # db deprecate
+    db_deprecate = db_sub.add_parser("deprecate", help="Deprecate a signature.")
+    db_deprecate.add_argument("--db", type=Path, required=True, help="Database path.")
+    db_deprecate.add_argument("--signature", type=str, required=True, help="Signature ID to deprecate.")
+    db_deprecate.add_argument("--reason", type=str, required=True, help="Deprecation reason.")
+    
     # Test command (v2 feature - signature replay & regression testing)
     test = sub.add_parser("test", help="Test signatures against binary corpus (v2 feature).")
     test.add_argument("--db", type=Path, required=True, help="Database path.")
@@ -176,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     test.add_argument("--corpus", type=str, nargs="+", help="Test against corpus (glob patterns).")
     test.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1).")
     test.add_argument("--record", action="store_true", help="Record results in database.")
+    test.add_argument("--allow-multiple", action="store_true", help="Allow multiple matches per signature (default: expect unique match).")
     _add_common_output_args(test)
     
     # Analyze command (v2 feature - temporal analysis)

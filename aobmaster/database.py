@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -96,7 +96,7 @@ class SignatureDatabase:
             # Apply migrations
             self._apply_migrations(cursor, current_version)
             cursor.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                         (DB_SCHEMA_VERSION, datetime.utcnow().isoformat()))
+                         (DB_SCHEMA_VERSION, datetime.now(timezone.utc).isoformat()))
         
         conn.commit()
     
@@ -192,6 +192,23 @@ class SignatureDatabase:
         
         conn.commit()
     
+    def _row_to_signature(self, row: sqlite3.Row, columns: list[str]) -> SignatureRecord:
+        """Convert a database row to SignatureRecord, handling optional columns."""
+        return SignatureRecord(
+            id=row["id"],
+            name=row["name"],
+            pattern=row["pattern"],
+            anchor_rva=row["anchor_rva"],
+            binary_hash=row["binary_hash"],
+            created_at=row["created_at"],
+            author=row["author"],
+            version_range=row["version_range"],
+            metadata=json.loads(row["metadata_json"]),
+            parent_id=row["parent_id"] if "parent_id" in columns else None,
+            deprecated=bool(row["deprecated"]) if "deprecated" in columns else False,
+            deprecation_reason=row["deprecation_reason"] if "deprecation_reason" in columns else None,
+        )
+    
     def get_signature(self, signature_id: str) -> Optional[SignatureRecord]:
         """Get signature by ID."""
         conn = self._connect()
@@ -203,20 +220,8 @@ class SignatureDatabase:
         if not row:
             return None
         
-        return SignatureRecord(
-            id=row["id"],
-            name=row["name"],
-            pattern=row["pattern"],
-            anchor_rva=row["anchor_rva"],
-            binary_hash=row["binary_hash"],
-            created_at=row["created_at"],
-            author=row["author"],
-            version_range=row["version_range"],
-            metadata=json.loads(row["metadata_json"]),
-            parent_id=row.get("parent_id"),
-            deprecated=bool(row.get("deprecated", 0)),
-            deprecation_reason=row.get("deprecation_reason"),
-        )
+        columns = [col[0] for col in cursor.description]
+        return self._row_to_signature(row, columns)
     
     def list_signatures(self, name_filter: Optional[str] = None) -> list[SignatureRecord]:
         """
@@ -234,24 +239,8 @@ class SignatureDatabase:
         else:
             cursor.execute("SELECT * FROM signatures ORDER BY name")
         
-        results = []
-        for row in cursor.fetchall():
-            results.append(SignatureRecord(
-                id=row["id"],
-                name=row["name"],
-                pattern=row["pattern"],
-                anchor_rva=row["anchor_rva"],
-                binary_hash=row["binary_hash"],
-                created_at=row["created_at"],
-                author=row["author"],
-                version_range=row["version_range"],
-                metadata=json.loads(row["metadata_json"]),
-                parent_id=row.get("parent_id"),
-                deprecated=bool(row.get("deprecated", 0)),
-                deprecation_reason=row.get("deprecation_reason"),
-            ))
-        
-        return results
+        columns = [col[0] for col in cursor.description]
+        return [self._row_to_signature(row, columns) for row in cursor.fetchall()]
     
     def delete_signature(self, signature_id: str) -> bool:
         """
@@ -269,9 +258,9 @@ class SignatureDatabase:
     
     def get_signature_family(self, signature_id: str) -> list[SignatureRecord]:
         """
-        Get entire signature family (parent chain and children).
+        Get entire signature family (parent chain, siblings, and children).
         
-        Returns list ordered: root → parent → this → children
+        Returns list ordered: root → parent → siblings → children
         """
         sig = self.get_signature(signature_id)
         if not sig:
@@ -281,43 +270,36 @@ class SignatureDatabase:
         
         # Walk up to root
         current = sig
+        root = current
         while current.parent_id:
             parent = self.get_signature(current.parent_id)
             if not parent:
                 break
             family.insert(0, parent)
+            root = parent
             current = parent
         
         # Add current signature
         family.append(sig)
         
-        # Get all children (recursive)
-        def get_children(parent_id: str) -> list[SignatureRecord]:
+        # Get all children recursively from the root (includes siblings)
+        def get_all_descendants(parent_id: str) -> list[SignatureRecord]:
             conn = self._connect()
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM signatures WHERE parent_id = ?", (parent_id,))
-            children = []
+            columns = [col[0] for col in cursor.description]
+            descendants = []
             for row in cursor.fetchall():
-                child = SignatureRecord(
-                    id=row["id"],
-                    name=row["name"],
-                    pattern=row["pattern"],
-                    anchor_rva=row["anchor_rva"],
-                    binary_hash=row["binary_hash"],
-                    created_at=row["created_at"],
-                    author=row["author"],
-                    version_range=row["version_range"],
-                    metadata=json.loads(row["metadata_json"]),
-                    parent_id=row.get("parent_id"),
-                    deprecated=bool(row.get("deprecated", 0)),
-                    deprecation_reason=row.get("deprecation_reason"),
-                )
-                children.append(child)
+                child = self._row_to_signature(row, columns)
+                # Only add if not already in family (avoid duplicates)
+                if child.id != sig.id:
+                    descendants.append(child)
                 # Recursive: get children of children
-                children.extend(get_children(child.id))
-            return children
+                descendants.extend(get_all_descendants(child.id))
+            return descendants
         
-        family.extend(get_children(sig.id))
+        # Get all descendants from the root
+        family.extend(get_all_descendants(root.id))
         
         return family
     
@@ -354,7 +336,7 @@ class SignatureDatabase:
             signature_id,
             binary_path,
             binary_hash,
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             1 if passed else 0,
             failure_reason,
         ))
@@ -376,6 +358,7 @@ class SignatureDatabase:
         for row in cursor.fetchall():
             results.append({
                 "id": row["id"],
+                "signature_id": row["signature_id"],
                 "binary_path": row["binary_path"],
                 "binary_hash": row["binary_hash"],
                 "test_date": row["test_date"],
@@ -391,7 +374,7 @@ class SignatureDatabase:
         
         export_data = {
             "version": DB_SCHEMA_VERSION,
-            "exported_at": datetime.utcnow().isoformat(),
+            "exported_at": datetime.now(timezone.utc).isoformat(),
             "signatures": [sig.to_dict() for sig in signatures],
         }
         

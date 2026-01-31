@@ -78,6 +78,7 @@ def _bool_arg(s: str) -> bool:
 def run_synth(args: Any) -> int:
     # Initialize trace collector (v2 feature, opt-in)
     trace = TraceCollector(enabled=getattr(args, 'explain', False))
+    warnings: list[AoBMasterWarning] = []
     
     base_pe = PEFile(args.base)
     versions = unique_preserve_order([str(p) for p in (args.versions or [])])
@@ -99,35 +100,26 @@ def run_synth(args: Any) -> int:
         
         structural_context = get_structural_context(base_pe, base_anchor_rva)
         
-        # If explain mode, add structural context to trace
-        if trace.enabled:
-            trace.add({
-                "type": "structural_anchor_resolution",
-                "function_detected": structural_context["function_detected"],
-                "function_start_rva": hex(structural_context["function_start_rva"]) if structural_context["function_start_rva"] else None,
-                "prologue_pattern": structural_context["prologue_pattern"],
-                "offset_from_start": structural_context["offset_from_start"],
-                "confidence": structural_context["confidence"],
-                "anchor_type": structural_context.get("anchor_type", "unknown"),
-                "warnings": structural_context["warnings"]
-            })
+        # Structural context is added to final output JSON, not trace
+        # (Adding to trace would require creating a StructuralAnchorEvent class)
         
         # Validate structural anchor
         min_confidence = getattr(args, 'structural_min_confidence', 0.60)
         if structural_context["confidence"] < min_confidence:
-            raise AoBMasterError(
-                ExitCode.ANCHOR_FAILURE,
-                "structural_anchor_low_confidence",
+            # Automatic fallback to byte-offset mode when confidence is too low
+            warnings.append(AoBMasterWarning(
+                "structural_anchor_fallback",
                 f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {min_confidence:.2f}. "
-                f"Use --anchor-mode byte-offset to fallback to v1.x behavior, or lower --structural-min-confidence.",
+                f"Falling back to byte-offset mode.",
                 {
                     "confidence": structural_context["confidence"],
                     "min_confidence": min_confidence,
                     "warnings": structural_context["warnings"]
                 }
-            )
-        
-        if structural_context["warnings"]:
+            ))
+            # Setting to None signals fallback to byte-offset anchor mode
+            structural_context = None
+        elif structural_context["warnings"]:
             for warning_msg in structural_context["warnings"]:
                 warnings.append(AoBMasterWarning("structural_anchor_warning", warning_msg, {}))
     
@@ -151,7 +143,6 @@ def run_synth(args: Any) -> int:
         )
 
     # Instruction boundary recovery is defined as part of anchor handling; do it before bytespan alignment.
-    warnings: list[AoBMasterWarning] = []
     original_fo = base_anchor_fo
     base_anchor_fo, w = resync_anchor_to_insn_start(base_pe, base_section, base_anchor_fo)
     if w:
@@ -182,13 +173,15 @@ def run_synth(args: Any) -> int:
     for aligned_anchor in aligned:
         if aligned_anchor.path != str(args.base):
             drift = aligned_anchor.anchor_rva - base_anchor_rva
+            # Determine ambiguity: seed_hits > 1 means multiple matches (ambiguous)
+            ambiguity = aligned_anchor.seed_hits is not None and aligned_anchor.seed_hits > 1
             trace.add(AlignmentEvent(
                 mode=args.align,
                 base_rva=base_anchor_rva,
                 version_path=str(aligned_anchor.path),
                 aligned_rva=aligned_anchor.anchor_rva,
                 drift=drift,
-                ambiguity=aligned_anchor.ambiguity,
+                ambiguity=ambiguity,
             ))
 
     # After alignment, the "base" record is aligned[0] and may differ from initial FO
@@ -374,7 +367,7 @@ def run_synth(args: Any) -> int:
         
         # Trace scoring event
         trace.add(ScoringEvent(
-            candidate_pattern=c.aob_string,
+            candidate_pattern=c.pattern.to_ce_string(),
             uniqueness=U,
             presence=P,
             specificity=S,

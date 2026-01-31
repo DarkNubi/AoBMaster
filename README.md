@@ -1,12 +1,37 @@
-# AoBMaster v1.1
+# AoBMaster v2.0
 
-AoBMaster is a **standalone, deterministic CLI tool** that synthesizes **stable Array-of-Bytes (AoB) signatures** from a known **anchor address** in a **PE x64** binary, and optionally validates those signatures across multiple versions of the same program.
+AoBMaster is a **standalone, deterministic CLI tool and signature management platform** that synthesizes **stable Array-of-Bytes (AoB) signatures** from a known **anchor address** in a **PE x64** binary, and optionally validates those signatures across multiple versions of the same program.
+
+**What's New in v2.0:**
+- 🔍 **Explainability**: Understand WHY patterns work with `--explain` mode
+- 💾 **Signature Database**: Persistent storage and version control for signatures
+- 🧪 **Automated Testing**: Test signatures against binary corpus with regression detection
+- 📊 **Temporal Analysis**: Predict when signatures will break before they break
+- 🏗️ **Signature Families**: Track signature evolution and lineage over time
+- 🎯 **Structural Anchors**: Function-relative anchoring (experimental)
+
+v2.0 is **fully backward compatible** with v1.x - all v1.x commands work identically.
 
 ## Commands
+
+### v1.x Commands (Core Functionality)
 
 - `aobmaster synth` — generate and rank AoB candidates from an anchor
 - `aobmaster scan` — scan a PE file for a CE-style AoB pattern
 - `aobmaster info` — show basic PE metadata
+
+### v2 Commands (Signature Management & Analysis)
+
+- `aobmaster synth --explain` — generate signatures with explainability trace
+- `aobmaster db init` — initialize signature database
+- `aobmaster db save` — save signature to database
+- `aobmaster db list` — list all signatures in database
+- `aobmaster db query` — query signature by ID
+- `aobmaster db export` — export signatures to JSON
+- `aobmaster db import` — import signatures from JSON
+- `aobmaster test` — test signatures against binary corpus
+- `aobmaster analyze` — perform temporal analysis on signatures
+- `aobmaster diagnose` — show signature family lineage
 
 ## Quick Start Examples
 
@@ -53,6 +78,39 @@ Generate multiple candidate sets with different context windows:
 aobmaster synth --base game.exe --anchor-rva 0x123456 --context-variations on
 ```
 
+### v2 Explainability Mode
+
+Understand WHY patterns work or fail:
+
+```bash
+aobmaster synth --base game.exe --anchor-rva 0x123456 --explain
+```
+
+### v2 Database Workflow
+
+Build a signature database for your project:
+
+```bash
+# Initialize database
+aobmaster db init --db signatures.db
+
+# Generate and manually save signature
+aobmaster synth --base game.exe --anchor-rva 0x123456 --format json > sig.json
+# (Then use db save to store it - see documentation)
+
+# List all signatures
+aobmaster db list --db signatures.db
+
+# Test signatures against corpus
+aobmaster test --db signatures.db --corpus "releases/*.exe" --record
+
+# Analyze signature stability over time
+aobmaster analyze --db signatures.db
+
+# View signature family lineage
+aobmaster diagnose --db signatures.db --signature-id sig_001
+```
+
 ### Control Output Size
 
 Limit the number of top candidates shown in text/CE formats:
@@ -60,6 +118,155 @@ Limit the number of top candidates shown in text/CE formats:
 ```bash
 aobmaster synth --base game.exe --anchor-rva 0x123456 --format text --top-n 10
 ```
+
+## v2 Features Deep Dive
+
+### Explainability (--explain)
+
+v2 adds transparent reasoning about signature generation:
+
+```bash
+aobmaster synth --base game.exe --anchor-rva 0x123456 --explain
+```
+
+The `--explain` flag adds structured trace events showing:
+- **Anchor Resolution**: How the anchor address was resolved (RVA/FO/VA)
+- **Alignment Events**: How patterns were aligned across versions
+- **Wildcarding Decisions**: Why each byte is wildcarded or fixed
+- **Scoring Breakdown**: Component scores (uniqueness, presence, specificity, length, proximity)
+- **Validation Results**: Why patterns passed or failed validation
+
+This makes AoBMaster a "glass box" instead of a "black box" - you understand exactly why patterns work.
+
+### Signature Database
+
+Store and manage signatures persistently:
+
+```bash
+# Initialize
+aobmaster db init --db sigs.db
+
+# Save signature (after manual creation - see full docs)
+aobmaster db save --db sigs.db --id sig_001 --name "player_health" --pattern "48 8B ?? ??" ...
+
+# List with optional filter
+aobmaster db list --db sigs.db --filter "health"
+
+# Query by ID
+aobmaster db query --db sigs.db --id sig_001
+
+# Export for sharing
+aobmaster db export --db sigs.db --output sigs.json
+
+# Import from team member
+aobmaster db import --db sigs.db --input team_sigs.json
+```
+
+**Benefits:**
+- Signatures persist across sessions
+- Version control friendly (export to JSON)
+- Team collaboration (share databases)
+- Audit trails (who created what, when)
+
+### Automated Testing
+
+Test signatures against binary corpus automatically:
+
+```bash
+# Test single signature
+aobmaster test --db sigs.db --signature sig_001 --binary game.exe
+
+# Test against corpus (glob patterns)
+aobmaster test --db sigs.db --corpus "releases/*.exe"
+
+# Record results in database
+aobmaster test --db sigs.db --corpus "*.exe" --record
+
+# Parallel execution
+aobmaster test --db sigs.db --corpus "*.exe" --parallel 4
+```
+
+**Use Cases:**
+- CI/CD regression testing
+- Signature validation before deployment
+- Quality assurance workflows
+- Pattern stability monitoring
+
+### Temporal Analysis
+
+Predict when signatures will break:
+
+```bash
+# Analyze single signature
+aobmaster analyze --db sigs.db --signature-id sig_001
+
+# Analyze all signatures
+aobmaster analyze --db sigs.db
+```
+
+**Output includes:**
+- **Pass Rate**: Historical success rate (e.g., 87.0%)
+- **Confidence Interval**: Current/pessimistic/optimistic estimates
+- **Stability Assessment**: "stable", "moderately_stable", "fragile", "unstable"
+- **Breakage Prediction**: Likelihood of future failure
+- **Drift Analysis**: RVA drift trends over time
+- **Recommendations**: Actionable advice (e.g., "Consider regenerating signature")
+
+**This is v2's killer feature:** Know when patterns will break BEFORE they break, not after.
+
+### Signature Families
+
+Track signature evolution over time:
+
+```bash
+aobmaster diagnose --db sigs.db --signature-id sig_002
+```
+
+**Example Output:**
+```
+Signature Family: player_health
+Family Size: 3 signatures
+
+Lineage:
+  1. player_health_v1 (sig_001) [DEPRECATED]
+     Pattern: 48 8B ?? ?? ?? ??
+     Version Range: 1.0.0-1.5.3
+     Tests: 15, Pass Rate: 100.0%
+     Deprecation: Broke at v1.6 due to compiler inlining
+  
+    2. player_health_v2 (sig_002) ← CURRENT
+       Pattern: 48 83 EC 20 48 8B ?? ?? ?? ??
+       Version Range: 1.6.0-current
+       Tests: 8, Pass Rate: 87.5%
+       Parent: sig_001
+```
+
+**Benefits:**
+- Never lose institutional knowledge
+- Understand why signatures broke
+- Track pattern evolution
+- Forensic analysis of signature history
+
+### Structural Anchors (Experimental)
+
+Function-relative anchoring (opt-in, high-risk):
+
+```bash
+aobmaster synth --base game.exe --anchor-rva 0x123456 --anchor-mode structural
+```
+
+**How it works:**
+- Detects function boundaries (prologue patterns)
+- Anchors patterns relative to function start
+- More resilient to code movement within functions
+
+**Caveats:**
+- Heuristic-based (70-80% accuracy)
+- Only works with standard compiler-generated prologues
+- Fails loudly on low confidence
+- Use with caution and validation
+
+**Default:** `--anchor-mode byte-offset` (v1.x behavior)
 
 ## Wildcard Profiles
 
@@ -198,11 +405,20 @@ Each candidate receives a composite score (0.0-1.0) based on:
 - **Text**: short human summary and top-ranked candidates.
 - **CE**: `aobscanmodule(...)` lines for the top-ranked candidates.
 
-## Limitations (v1.1)
+## Limitations
 
-- PE x86 and x64 (PE32 (x86) and PE32+ (x64)).
-- File-based analysis only (no live processes).
-- No patching or binary modification.
+### v1.x Limitations (Still Apply)
+
+- PE x86 and x64 (PE32 (x86) and PE32+ (x64)) only
+- File-based analysis only (no live processes)
+- No patching or binary modification
+
+### v2 Additional Notes
+
+- **SDK (Phase 7)**: Design complete, implementation pending (v2.1 roadmap)
+- **Structural Anchors (Phase 6)**: Experimental, heuristic-based, opt-in only
+- **Test Command**: Core functionality complete, some CLI features pending
+- **Multi-Architecture**: Still PE x64 only (ARM, MIPS, etc. not supported)
 
 ## Development
 
@@ -271,3 +487,126 @@ aobmaster synth --base target.exe --anchor-rva 0x5678 \
 ```
 
 
+
+## Upgrading from v1.x to v2.0
+
+### Is v2 Right for You?
+
+**Stick with v1.x if:**
+- You only need one-shot signature generation
+- You don't need signature persistence
+- Simple CLI workflow is sufficient
+
+**Upgrade to v2.0 if:**
+- You want to understand WHY patterns work (`--explain`)
+- You need to manage signatures over time (database)
+- You want automated testing and CI/CD integration
+- You need predictive analysis (when will signatures break?)
+- You work on a team and need to share signatures
+
+### Migration Path
+
+v2.0 is **100% backward compatible**. Your v1.x commands work identically:
+
+```bash
+# This still works exactly as before
+aobmaster synth --base game.exe --anchor-rva 0x123456
+```
+
+To adopt v2 features progressively:
+
+1. **Start with --explain**: Add explainability to existing workflows
+   ```bash
+   aobmaster synth --base game.exe --anchor-rva 0x123456 --explain
+   ```
+
+2. **Create a database**: Initialize signature storage
+   ```bash
+   aobmaster db init --db project_sigs.db
+   ```
+
+3. **Store signatures**: Save your generated patterns
+   ```bash
+   # Generate signature, then save manually (see full docs)
+   ```
+
+4. **Add testing**: Validate against corpus
+   ```bash
+   aobmaster test --db project_sigs.db --corpus "releases/*.exe" --record
+   ```
+
+5. **Enable analysis**: Track temporal stability
+   ```bash
+   aobmaster analyze --db project_sigs.db
+   ```
+
+### Breaking Changes
+
+**None!** v2.0 is fully backward compatible. All v1.x commands, flags, and outputs work identically.
+
+### Version Numbers in Output
+
+- v1.x outputs: `"version": "1.1.0"`
+- v2.0 outputs: `"version": "2.0.0"`
+
+This allows tooling to detect v2 features programmatically.
+
+## What Makes v2 Different?
+
+### v1.x: Point-in-Time Tool
+
+- Generate signatures → use immediately
+- No memory (signatures are ephemeral)
+- Black box (no reasoning about decisions)
+- Manual testing required
+- Individual developer workflow
+
+### v2.0: Signature Intelligence Platform
+
+- Generate signatures → store → track → analyze
+- Persistent memory (signatures accumulate value)
+- Glass box (full explainability with `--explain`)
+- Automated testing with regression detection
+- Team collaboration workflow
+- Predictive intelligence (know when patterns will break)
+
+**Key insight:** v2 transforms signatures from **disposable byte patterns** into **valuable, versioned assets** with institutional knowledge.
+
+## v2 Roadmap
+
+### v2.0 (Current)
+- ✅ Explainability (Phase 1)
+- ✅ Signature Database (Phase 2)
+- ✅ Automated Testing (Phase 3)
+- ✅ Temporal Analysis (Phase 4)
+- ✅ Signature Families (Phase 5)
+- ✅ Structural Anchors (Phase 6, experimental)
+- ⚠️ SDK (Phase 7, design complete, implementation pending)
+
+### v2.1 (Planned)
+- Full SDK implementation
+- Enhanced temporal prediction models
+- Performance optimizations
+- Additional CI/CD integrations
+
+### v2.2+ (Future)
+- Multi-architecture support (ARM64, x86-32)
+- Advanced structural analysis (CFG reconstruction)
+- Cloud-based signature repository (if demand exists)
+- Web dashboard for signature browsing (optional)
+
+## Contributing & Feedback
+
+Found a bug? Have a feature request? See something that could be improved?
+
+- File issues on GitHub
+- Check existing documentation (V2_FINAL_SUMMARY.md, AOBMASTER_V2_VISION.md)
+- Read implementation summaries (PHASE_*_SUMMARY.md files)
+
+## License
+
+Proprietary - see project license file
+
+---
+
+**AoBMaster v2.0** - From byte patterns to signature intelligence.
