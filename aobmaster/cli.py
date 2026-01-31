@@ -78,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     synth.add_argument("--require-unique", choices=["true", "false"], default="true")
     synth.add_argument("--require-present-all", choices=["true", "false"], default="true")
+    
+    synth.add_argument(
+        "--explain",
+        action="store_true",
+        help="Enable explainability mode: output detailed trace of all decisions (v2 feature)."
+    )
 
     _add_common_output_args(synth)
 
