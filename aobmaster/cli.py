@@ -7,6 +7,7 @@ from . import __version__
 from .errors import AoBMasterError, ExitCode
 from .info import run_info
 from .scan import run_scan
+from .smart import run_smart
 from .synth import run_synth
 
 
@@ -32,6 +33,12 @@ def build_parser() -> argparse.ArgumentParser:
     anchor.add_argument("--anchor-fo", type=str, help="Anchor file offset (hex).")
     anchor.add_argument("--anchor-va", type=str, help="Anchor virtual address (hex).")
     synth.add_argument("--versions", type=Path, nargs="*", default=[], help="Additional version binaries.")
+    synth.add_argument(
+        "--anchor-shift",
+        type=int,
+        default=0,
+        help="Try anchor ±N instructions to find stable regions (0=off, N=shift range). Example: 2 tries ±2 instructions."
+    )
 
     synth.add_argument("--align", choices=["anchor-rva", "bytespan"], default="bytespan")
     synth.add_argument("--seed-bytes", type=int, default=32)
@@ -41,11 +48,31 @@ def build_parser() -> argparse.ArgumentParser:
     synth.add_argument("--context-before", type=int, default=8)
     synth.add_argument("--context-after", type=int, default=8)
     synth.add_argument("--max-context-insns", type=int, default=32)
+    synth.add_argument(
+        "--context-variations",
+        choices=["off", "on"],
+        default="off",
+        help="Generate candidates with multiple context window sizes (off=single context, on=multiple variations)."
+    )
 
-    synth.add_argument("--profile", choices=["default", "strict", "aggressive"], default="default")
+    synth.add_argument(
+        "--profile",
+        choices=["minimal", "default", "strict", "balanced", "aggressive", "stack-only", "global-only", "memory-heavy"],
+        default="default",
+        help="Wildcard profile: minimal (branches only), default (balanced), strict (minimal), "
+             "balanced (default+globals), aggressive (all), stack-only (stack offsets), "
+             "global-only (RIP-relative), memory-heavy (all memory)."
+    )
 
     synth.add_argument("--min-insns", type=int, default=6)
     synth.add_argument("--max-insns", type=int, default=14)
+
+    synth.add_argument(
+        "--top-n",
+        type=int,
+        default=5,
+        help="Number of top-ranked candidates to include in text/CE output (default: 5). JSON includes all."
+    )
 
     synth.add_argument("--scan-range", choices=["section", "module"], default=None)
 
@@ -53,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
     synth.add_argument("--require-present-all", choices=["true", "false"], default="true")
 
     _add_common_output_args(synth)
+
+    # Smart analyze command
+    smart = sub.add_parser("smart", help="Analyze binary region and suggest stable anchor points.")
+    smart.add_argument("--base", type=Path, required=True, help="PE x64 binary to analyze.")
+    smart.add_argument("--rva", type=str, required=True, help="RVA to start analysis (hex).")
+    smart.add_argument("--insns", type=int, default=50, help="Number of instructions to analyze (default: 50).")
+    smart.add_argument("--top-n", type=int, default=5, help="Number of top anchor suggestions (default: 5).")
+    _add_common_output_args(smart)
 
     scan = sub.add_parser("scan", help="Scan a PE file for a CE-style AoB pattern.")
     scan.add_argument("--file", type=Path, required=True, help="PE x64 binary to scan.")
@@ -75,6 +110,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "synth":
             return run_synth(args)
+        if args.cmd == "smart":
+            return run_smart(args)
         if args.cmd == "scan":
             return run_scan(args)
         if args.cmd == "info":

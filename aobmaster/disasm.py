@@ -29,7 +29,9 @@ def _decode_stream(pe: PEFile, start_fo: int, *, max_bytes: int, max_insns: int)
     start_rva = pe.fo_to_rva(start_fo)
     ip = pe.rva_to_va(start_rva)
 
-    decoder = Decoder(64, buf, ip=ip, options=DecoderOptions.NONE)
+    # Use appropriate bitness based on PE file type
+    bitness = 64 if pe.info.is_64bit else 32
+    decoder = Decoder(bitness, buf, ip=ip, options=DecoderOptions.NONE)
     out: list[DecodedInsn] = []
     cur_fo = start_fo
     for _ in range(max_insns):

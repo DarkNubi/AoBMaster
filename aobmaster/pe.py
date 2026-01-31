@@ -9,7 +9,9 @@ from .errors import AoBMasterError, ExitCode
 
 
 IMAGE_FILE_MACHINE_AMD64 = 0x8664
+IMAGE_FILE_MACHINE_I386 = 0x14C
 PE32_PLUS_MAGIC = 0x20B
+PE32_MAGIC = 0x10B
 
 IMAGE_SCN_MEM_EXECUTE = 0x20000000
 
@@ -52,13 +54,14 @@ class PEInfo:
     entry_point_rva: int
     size_of_image: int
     sections: tuple[Section, ...]
+    is_64bit: bool  # True for PE32+, False for PE32
 
 
 class PEFile:
     def __init__(self, path: Path):
         self.path = path
         self._data = path.read_bytes()
-        self.info = _parse_pe64(self._data, path=path)
+        self.info = _parse_pe(self._data, path=path)
 
     @property
     def data(self) -> bytes:
@@ -145,7 +148,8 @@ def _read_u64(b: bytes, off: int) -> int:
     return struct.unpack_from("<Q", b, off)[0]
 
 
-def _parse_pe64(data: bytes, *, path: Path) -> PEInfo:
+def _parse_pe(data: bytes, *, path: Path) -> PEInfo:
+    """Parse PE file (supports both PE32 and PE32+)."""
     if len(data) < 0x100:
         raise AoBMasterError(ExitCode.ANCHOR_FAILURE, "invalid_pe", "File too small to be a PE", {"path": str(path)})
 
@@ -165,28 +169,51 @@ def _parse_pe64(data: bytes, *, path: Path) -> PEInfo:
     size_opt = _read_u16(data, coff + 16)
     opt = coff + 20
 
-    if machine != IMAGE_FILE_MACHINE_AMD64:
+    # Check machine type
+    is_64bit = machine == IMAGE_FILE_MACHINE_AMD64
+    is_32bit = machine == IMAGE_FILE_MACHINE_I386
+    
+    if not is_64bit and not is_32bit:
         raise AoBMasterError(
             ExitCode.ANCHOR_FAILURE,
             "unsupported_machine",
-            "Only PE x64 (AMD64) is supported",
+            f"Only PE x86 (I386) and x64 (AMD64) are supported, got machine type {hex(machine)}",
             {"machine": hex(machine)},
         )
+    
     if opt + size_opt > len(data):
         raise AoBMasterError(ExitCode.ANCHOR_FAILURE, "invalid_pe", "Optional header out of range", {"path": str(path)})
 
     magic = _read_u16(data, opt + 0)
-    if magic != PE32_PLUS_MAGIC:
+    
+    # Validate magic matches machine type
+    if is_64bit and magic != PE32_PLUS_MAGIC:
         raise AoBMasterError(
             ExitCode.ANCHOR_FAILURE,
             "unsupported_pe",
-            "Only PE32+ (x64) is supported",
+            f"PE64 machine type requires PE32+ magic (0x20B), got {hex(magic)}",
+            {"magic": hex(magic)},
+        )
+    elif is_32bit and magic != PE32_MAGIC:
+        raise AoBMasterError(
+            ExitCode.ANCHOR_FAILURE,
+            "unsupported_pe",
+            f"PE32 machine type requires PE32 magic (0x10B), got {hex(magic)}",
             {"magic": hex(magic)},
         )
 
+    # Parse optional header fields (offsets differ between PE32 and PE32+)
     entry_point_rva = _read_u32(data, opt + 16)
-    image_base = _read_u64(data, opt + 24)
-    size_of_image = _read_u32(data, opt + 56)
+    
+    if is_64bit:
+        # PE32+ (64-bit): ImageBase is at offset 24 and is 8 bytes (QWORD)
+        image_base = _read_u64(data, opt + 24)
+        size_of_image = _read_u32(data, opt + 56)
+    else:
+        # PE32 (32-bit): ImageBase is at offset 28 and is 4 bytes (DWORD)
+        # Offset differs from PE32+ because BaseOfData field (4 bytes) exists only in PE32
+        image_base = _read_u32(data, opt + 28)
+        size_of_image = _read_u32(data, opt + 56)
 
     sec_table = opt + size_opt
     sec_size = 40
@@ -214,5 +241,12 @@ def _parse_pe64(data: bytes, *, path: Path) -> PEInfo:
             )
         )
 
-    return PEInfo(image_base=image_base, entry_point_rva=entry_point_rva, size_of_image=size_of_image, sections=tuple(sections))
+    return PEInfo(
+        image_base=image_base,
+        entry_point_rva=entry_point_rva,
+        size_of_image=size_of_image,
+        sections=tuple(sections),
+        is_64bit=is_64bit,
+    )
+
 
