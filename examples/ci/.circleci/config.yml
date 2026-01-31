@@ -1,0 +1,135 @@
+# CircleCI Configuration for AoBMaster
+# Tests signatures against binary corpus in CI/CD
+
+version: 2.1
+
+orbs:
+  python: circleci/python@2.1.1
+
+parameters:
+  binary-corpus:
+    type: string
+    default: "binaries/*.exe"
+  parallel-workers:
+    type: integer
+    default: 4
+
+jobs:
+  test-signatures:
+    docker:
+      - image: cimg/python:3.10
+    resource_class: medium
+    steps:
+      - checkout
+      
+      - run:
+          name: Install AoBMaster
+          command: |
+            python -m pip install --upgrade pip
+            pip install aobmaster
+      
+      - run:
+          name: Test Signatures
+          command: |
+            aobmaster test --db signatures.db \
+              --corpus "<< pipeline.parameters.binary-corpus >>" \
+              --parallel << pipeline.parameters.parallel-workers >> \
+              --record \
+              --format json > test-results.json
+      
+      - run:
+          name: Validate Results
+          command: |
+            python << 'EOF'
+            import json
+            import sys
+
+            with open('test-results.json') as f:
+                results = json.load(f)
+
+            failed = results.get('summary', {}).get('failed', 0)
+            passed = results.get('summary', {}).get('passed', 0)
+            total = results.get('summary', {}).get('total', 0)
+
+            print(f"Test Results: {passed}/{total} passed, {failed}/{total} failed")
+
+            if failed > 0:
+                print(f"\nFailed signatures:")
+                for result in results.get('results', []):
+                    if not result.get('passed'):
+                        sig_id = result.get('signature_id')
+                        reason = result.get('failure_reason', 'Unknown')
+                        print(f"  - {sig_id}: {reason}")
+                sys.exit(1)
+            else:
+                print("\n✓ All signatures passed validation")
+            EOF
+      
+      - store_artifacts:
+          path: test-results.json
+          destination: test-results
+      
+      - store_test_results:
+          path: test-results.json
+
+  analyze-stability:
+    docker:
+      - image: cimg/python:3.10
+    steps:
+      - checkout
+      
+      - run:
+          name: Install AoBMaster
+          command: pip install aobmaster
+      
+      - run:
+          name: Analyze Signatures
+          command: |
+            aobmaster analyze --db signatures.db \
+              --format json > analysis-results.json
+      
+      - run:
+          name: Check for Critical Alerts
+          command: |
+            python << 'EOF'
+            import json
+            import sys
+
+            with open('analysis-results.json') as f:
+                analyses = json.load(f)
+
+            critical_count = 0
+            warning_count = 0
+
+            for analysis in analyses.get('analyses', []):
+                alerts = analysis.get('alerts', [])
+                for alert in alerts:
+                    if alert.get('severity') == 'critical':
+                        critical_count += 1
+                        sig_id = analysis.get('signature_id')
+                        msg = alert.get('message')
+                        print(f"CRITICAL: {sig_id} - {msg}")
+                    elif alert.get('severity') == 'warning':
+                        warning_count += 1
+
+            if critical_count > 0:
+                print(f"\n⚠️  {critical_count} critical alert(s) found")
+                print("Review signature stability before deployment")
+                sys.exit(1)
+            elif warning_count > 0:
+                print(f"\nℹ️  {warning_count} warning(s) found (non-blocking)")
+            else:
+                print("\n✓ All signatures are stable")
+            EOF
+      
+      - store_artifacts:
+          path: analysis-results.json
+          destination: analysis-results
+
+workflows:
+  test-and-analyze:
+    jobs:
+      - test-signatures
+      - analyze-stability:
+          requires:
+            - test-signatures

@@ -1,0 +1,130 @@
+// Jenkins Pipeline for AoBMaster
+// Tests signatures against binary corpus in CI/CD
+
+pipeline {
+    agent any
+    
+    parameters {
+        string(name: 'BINARY_CORPUS', defaultValue: 'binaries/*.exe', description: 'Glob pattern for binary corpus')
+        string(name: 'PARALLEL_WORKERS', defaultValue: '4', description: 'Number of parallel test workers')
+        booleanParam(name: 'RECORD_RESULTS', defaultValue: true, description: 'Record test results to database')
+    }
+    
+    environment {
+        PYTHON_VERSION = '3.10'
+        DB_PATH = 'signatures.db'
+    }
+    
+    stages {
+        stage('Setup') {
+            steps {
+                echo 'Setting up Python environment'
+                sh '''
+                    python3 -m pip install --upgrade pip
+                    pip install aobmaster
+                '''
+            }
+        }
+        
+        stage('Test Signatures') {
+            steps {
+                echo "Testing signatures against corpus: ${params.BINARY_CORPUS}"
+                sh """
+                    aobmaster test --db ${DB_PATH} \\
+                      --corpus "${params.BINARY_CORPUS}" \\
+                      --parallel ${params.PARALLEL_WORKERS} \\
+                      ${params.RECORD_RESULTS ? '--record' : ''} \\
+                      --format json > test-results.json
+                """
+            }
+        }
+        
+        stage('Validate Results') {
+            steps {
+                echo 'Validating test results'
+                script {
+                    def testResults = readJSON file: 'test-results.json'
+                    def failed = testResults.summary.failed ?: 0
+                    def passed = testResults.summary.passed ?: 0
+                    def total = testResults.summary.total ?: 0
+                    
+                    echo "Test Results: ${passed}/${total} passed, ${failed}/${total} failed"
+                    
+                    if (failed > 0) {
+                        // Print failed signatures
+                        echo "Failed signatures:"
+                        testResults.results.each { result ->
+                            if (!result.passed) {
+                                echo "  - ${result.signature_id}: ${result.failure_reason}"
+                            }
+                        }
+                        error("Signature validation failed: ${failed} signature(s) failed")
+                    } else {
+                        echo "✓ All signatures passed validation"
+                    }
+                }
+            }
+        }
+        
+        stage('Analyze Stability') {
+            steps {
+                echo 'Performing temporal analysis'
+                sh """
+                    aobmaster analyze --db ${DB_PATH} \\
+                      --format json > analysis-results.json
+                """
+            }
+        }
+        
+        stage('Check Alerts') {
+            steps {
+                echo 'Checking for critical alerts'
+                script {
+                    def analysis = readJSON file: 'analysis-results.json'
+                    def criticalCount = 0
+                    def warningCount = 0
+                    
+                    analysis.analyses.each { sig ->
+                        sig.alerts?.each { alert ->
+                            if (alert.severity == 'critical') {
+                                criticalCount++
+                                echo "CRITICAL: ${sig.signature_id} - ${alert.message}"
+                            } else if (alert.severity == 'warning') {
+                                warningCount++
+                            }
+                        }
+                    }
+                    
+                    if (criticalCount > 0) {
+                        error("⚠️  ${criticalCount} critical alert(s) found - review signature stability")
+                    } else if (warningCount > 0) {
+                        echo "ℹ️  ${warningCount} warning(s) found (non-blocking)"
+                    } else {
+                        echo "✓ All signatures are stable"
+                    }
+                }
+            }
+        }
+        
+        stage('Archive') {
+            steps {
+                echo 'Archiving test and analysis results'
+                archiveArtifacts artifacts: 'test-results.json,analysis-results.json', 
+                                allowEmptyArchive: false
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '✓ Pipeline completed successfully'
+        }
+        failure {
+            echo '✗ Pipeline failed - check logs for details'
+        }
+        always {
+            // Clean up workspace
+            cleanWs()
+        }
+    }
+}
