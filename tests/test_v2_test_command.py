@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aobmaster.database import SignatureDatabase, SignatureRecord
 
@@ -41,7 +41,7 @@ def test_test_single_signature(tmp_path):
         pattern="48 83 EC 28 48 8B 05 ?? ?? ?? ?? 48 85 C0 ?? ?? 48 83 C4 28 C3",
         anchor_rva=0x1000,
         binary_hash="test_hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -91,7 +91,7 @@ def test_test_signature_not_found(tmp_path):
         pattern="90 90 90 90 90",  # Pattern that doesn't exist
         anchor_rva=0x1000,
         binary_hash="test_hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -143,7 +143,7 @@ def test_test_signature_multiple_matches(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="test_hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -192,7 +192,7 @@ def test_test_multiple_signatures(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash1",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -204,7 +204,7 @@ def test_test_multiple_signatures(tmp_path):
         pattern="55 48 89 E5",
         anchor_rva=0x1005,
         binary_hash="hash2",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -255,7 +255,7 @@ def test_test_corpus_multiple_binaries(tmp_path):
         pattern="48 83 EC ??",  # Wildcarded to match both
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -307,7 +307,7 @@ def test_test_record_results(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -364,7 +364,7 @@ def test_test_record_failure(tmp_path):
         pattern="90 90 90 90",  # Won't match
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -422,7 +422,7 @@ def test_test_parallel_execution(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -471,7 +471,7 @@ def test_test_match_offsets_reported(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -524,7 +524,7 @@ def test_test_allow_multiple_matches(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -572,7 +572,7 @@ def test_test_summary_output(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},

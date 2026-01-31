@@ -6,7 +6,7 @@ Handles db init, save, query, list, export, import commands.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,7 @@ def run_db_save(args: Any) -> int:
         pattern=args.pattern,
         anchor_rva=anchor_rva,
         binary_hash=args.binary_hash,
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=getattr(args, 'author', None),
         version_range=getattr(args, 'version_range', None),
         metadata={},  # Can be extended later

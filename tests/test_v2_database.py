@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aobmaster.database import DB_SCHEMA_VERSION, SignatureDatabase, SignatureRecord
@@ -92,7 +92,7 @@ def test_db_save_signature(tmp_path):
         pattern="48 83 EC 28 ?? ?? ?? ?? 48 85 C0",
         anchor_rva=0x1000,
         binary_hash="abc123",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author="test_user",
         version_range="1.0.0-1.5.0",
         metadata={"test_key": "test_value"},
@@ -129,7 +129,7 @@ def test_db_list_signatures(tmp_path):
             pattern=f"48 83 EC {i:02X}",
             anchor_rva=0x1000 + i * 0x100,
             binary_hash=f"hash_{i}",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             author="test_user",
             version_range=None,
             metadata={},
@@ -157,7 +157,7 @@ def test_db_query_by_name(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash1",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -169,7 +169,7 @@ def test_db_query_by_name(tmp_path):
         pattern="48 83 EC 30",
         anchor_rva=0x2000,
         binary_hash="hash2",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -202,7 +202,7 @@ def test_db_query_by_hash(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="specific_hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -214,7 +214,7 @@ def test_db_query_by_hash(tmp_path):
         pattern="48 83 EC 30",
         anchor_rva=0x2000,
         binary_hash="different_hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -248,7 +248,7 @@ def test_db_upsert_behavior(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash1",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -262,7 +262,7 @@ def test_db_upsert_behavior(tmp_path):
         pattern="48 83 EC 30",
         anchor_rva=0x2000,
         binary_hash="hash2",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author="new_author",
         version_range="2.0.0",
         metadata={"updated": True},
@@ -296,7 +296,7 @@ def test_db_export_import(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash1",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author="exporter",
         version_range="1.0.0",
         metadata={"exported": True},
@@ -367,7 +367,7 @@ def test_db_test_result_storage(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash1",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -422,7 +422,7 @@ def test_db_schema_migration(tmp_path):
         )
     """)
     cursor.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, ?)",
-                  (datetime.utcnow().isoformat(),))
+                  (datetime.now(timezone.utc).isoformat(),))
     
     cursor.execute("""
         CREATE TABLE signatures (
@@ -442,7 +442,7 @@ def test_db_schema_migration(tmp_path):
     cursor.execute("""
         INSERT INTO signatures (id, name, pattern, anchor_rva, binary_hash, created_at, author, version_range, metadata_json)
         VALUES ('sig_001', 'Old Sig', '48 83 EC 28', 4096, 'hash1', ?, NULL, NULL, '{}')
-    """, (datetime.utcnow().isoformat(),))
+    """, (datetime.now(timezone.utc).isoformat(),))
     
     conn.commit()
     conn.close()
@@ -535,7 +535,7 @@ def test_db_list_via_cli(tmp_path):
             pattern=f"48 83 EC {i:02X}",
             anchor_rva=0x1000 + i,
             binary_hash=f"hash_{i}",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             author=None,
             version_range=None,
             metadata={},

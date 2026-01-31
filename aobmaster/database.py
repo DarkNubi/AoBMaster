@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -96,7 +96,7 @@ class SignatureDatabase:
             # Apply migrations
             self._apply_migrations(cursor, current_version)
             cursor.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
-                         (DB_SCHEMA_VERSION, datetime.utcnow().isoformat()))
+                         (DB_SCHEMA_VERSION, datetime.now(timezone.utc).isoformat()))
         
         conn.commit()
     
@@ -331,7 +331,7 @@ class SignatureDatabase:
             signature_id,
             binary_path,
             binary_hash,
-            datetime.utcnow().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             1 if passed else 0,
             failure_reason,
         ))
@@ -368,7 +368,7 @@ class SignatureDatabase:
         
         export_data = {
             "version": DB_SCHEMA_VERSION,
-            "exported_at": datetime.utcnow().isoformat(),
+            "exported_at": datetime.now(timezone.utc).isoformat(),
             "signatures": [sig.to_dict() for sig in signatures],
         }
         

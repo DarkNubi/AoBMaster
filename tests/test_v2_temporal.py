@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from aobmaster.database import SignatureDatabase, SignatureRecord
 
@@ -29,7 +29,7 @@ def test_analyze_single_signature(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -92,7 +92,7 @@ def test_analyze_confidence_intervals(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -154,7 +154,7 @@ def test_analyze_stability_assessment(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -207,7 +207,7 @@ def test_analyze_unstable_signature(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -260,7 +260,7 @@ def test_analyze_breakage_prediction(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -318,7 +318,7 @@ def test_analyze_all_signatures(tmp_path):
             pattern=f"48 83 EC {i:02X}",
             anchor_rva=0x1000 + i,
             binary_hash=f"hash_{i}",
-            created_at=datetime.utcnow().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             author=None,
             version_range=None,
             metadata={},
@@ -366,7 +366,7 @@ def test_analyze_with_recommendation(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -420,7 +420,7 @@ def test_analyze_no_test_history(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -461,7 +461,7 @@ def test_analyze_text_output(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -513,7 +513,7 @@ def test_analyze_temporal_trends(tmp_path):
         pattern="48 83 EC 28",
         anchor_rva=0x1000,
         binary_hash="hash",
-        created_at=datetime.utcnow().isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         author=None,
         version_range=None,
         metadata={},
@@ -527,7 +527,7 @@ def test_analyze_temporal_trends(tmp_path):
         # Manually insert with specific timestamps to simulate temporal progression
         conn = db._connect()
         cursor = conn.cursor()
-        test_date = (datetime.utcnow() - timedelta(days=20-i)).isoformat()
+        test_date = (datetime.now(timezone.utc) - timedelta(days=20-i)).isoformat()
         cursor.execute("""
             INSERT INTO test_results (signature_id, binary_path, binary_hash, test_date, passed, failure_reason)
             VALUES (?, ?, ?, ?, ?, ?)
