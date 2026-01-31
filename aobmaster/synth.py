@@ -85,6 +85,52 @@ def run_synth(args: Any) -> int:
 
     base_anchor_rva, base_anchor_fo, base_anchor_va = _resolve_anchor(base_pe, args)
     
+    # Phase 6 (v2): Structural anchor resolution (OPT-IN, HIGH RISK)
+    structural_context = None
+    anchor_mode = getattr(args, 'anchor_mode', 'byte-offset')
+    
+    if anchor_mode == 'structural':
+        # Import here to avoid dependency when not using structural mode
+        from .structural import (
+            resolve_structural_anchor,
+            validate_structural_anchor,
+            get_structural_context
+        )
+        
+        structural_context = get_structural_context(base_pe, base_anchor_rva)
+        
+        # If explain mode, add structural context to trace
+        if trace.enabled:
+            trace.add({
+                "type": "structural_anchor_resolution",
+                "function_detected": structural_context["function_detected"],
+                "function_start_rva": hex(structural_context["function_start_rva"]) if structural_context["function_start_rva"] else None,
+                "prologue_pattern": structural_context["prologue_pattern"],
+                "offset_from_start": structural_context["offset_from_start"],
+                "confidence": structural_context["confidence"],
+                "anchor_type": structural_context.get("anchor_type", "unknown"),
+                "warnings": structural_context["warnings"]
+            })
+        
+        # Validate structural anchor
+        min_confidence = getattr(args, 'structural_min_confidence', 0.60)
+        if structural_context["confidence"] < min_confidence:
+            raise AoBMasterError(
+                ExitCode.ANCHOR_FAILURE,
+                "structural_anchor_low_confidence",
+                f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {min_confidence:.2f}. "
+                f"Use --anchor-mode byte-offset to fallback to v1.x behavior, or lower --structural-min-confidence.",
+                {
+                    "confidence": structural_context["confidence"],
+                    "min_confidence": min_confidence,
+                    "warnings": structural_context["warnings"]
+                }
+            )
+        
+        if structural_context["warnings"]:
+            for warning_msg in structural_context["warnings"]:
+                warnings.append(AoBMasterWarning("structural_anchor_warning", warning_msg, {}))
+    
     # Trace anchor resolution
     trace.add(AnchorResolutionEvent(
         input_rva=parse_hex_int(args.anchor_rva) if args.anchor_rva else None,
@@ -365,6 +411,7 @@ def run_synth(args: Any) -> int:
                 "anchor_rva": args.anchor_rva,
                 "anchor_fo": args.anchor_fo,
                 "anchor_va": args.anchor_va,
+                "anchor_mode": anchor_mode,  # v2 Phase 6
             },
             "align": {
                 "mode": args.align,
@@ -392,6 +439,10 @@ def run_synth(args: Any) -> int:
         "errors": [],
         "candidates": results,
     }
+    
+    # Add structural context if structural mode was used (v2 Phase 6)
+    if structural_context:
+        out_obj["structural_anchor"] = structural_context
     
     # Add trace data if explain mode is enabled (v2 feature)
     if trace.enabled:

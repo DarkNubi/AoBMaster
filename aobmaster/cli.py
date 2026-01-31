@@ -88,6 +88,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable explainability mode: output detailed trace of all decisions (v2 feature)."
     )
+    
+    synth.add_argument(
+        "--anchor-mode",
+        choices=["byte-offset", "structural"],
+        default="byte-offset",
+        help="Anchor resolution mode (v2 Phase 6 feature - HIGH RISK): "
+             "byte-offset (v1.x behavior, default) or structural (function-relative anchoring). "
+             "Structural mode uses heuristics and may fail - requires manual validation."
+    )
+    
+    synth.add_argument(
+        "--structural-min-confidence",
+        type=float,
+        default=0.60,
+        help="Minimum confidence for structural anchor detection (0.0-1.0, default 0.60). "
+             "Only used with --anchor-mode structural."
+    )
 
     _add_common_output_args(synth)
 
