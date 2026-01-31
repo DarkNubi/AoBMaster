@@ -10,6 +10,7 @@ from .scan import run_scan
 from .smart import run_smart
 from .synth import run_synth
 from .db_commands import run_db
+from .test_command import run_test
 
 
 def _add_common_output_args(p: argparse.ArgumentParser) -> None:
@@ -147,6 +148,16 @@ def build_parser() -> argparse.ArgumentParser:
     db_import = db_sub.add_parser("import", help="Import signatures from JSON.")
     db_import.add_argument("--db", type=Path, required=True, help="Database path.")
     db_import.add_argument("--input", type=Path, required=True, help="Input JSON file.")
+    
+    # Test command (v2 feature - signature replay & regression testing)
+    test = sub.add_parser("test", help="Test signatures against binary corpus (v2 feature).")
+    test.add_argument("--db", type=Path, required=True, help="Database path.")
+    test.add_argument("--signature-id", type=str, help="Test specific signature (default: all).")
+    test.add_argument("--binary", type=Path, help="Test against single binary.")
+    test.add_argument("--corpus", type=str, nargs="+", help="Test against corpus (glob patterns).")
+    test.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1).")
+    test.add_argument("--record", action="store_true", help="Record results in database.")
+    _add_common_output_args(test)
 
     return parser
 
@@ -166,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_info(args)
         if args.cmd == "db":
             return run_db(args)
+        if args.cmd == "test":
+            return run_test(args)
         raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown command: {args.cmd}")
     except AoBMasterError as e:
         # Best-effort: return machine-readable JSON if requested.
