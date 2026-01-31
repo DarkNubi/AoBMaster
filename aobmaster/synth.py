@@ -75,49 +75,113 @@ def _bool_arg(s: str) -> bool:
     raise ValueError("expected true|false")
 
 
-def run_synth(args: Any) -> int:
+def run_synthesis_core(
+    base_binary: Path,
+    anchor_rva: int | None = None,
+    anchor_fo: int | None = None,
+    anchor_va: int | None = None,
+    version_binaries: list[Path] | None = None,
+    align_mode: str = "bytespan",
+    seed_bytes: int = 32,
+    seed_scan: str = "section",
+    seed_allow_multi: bool = False,
+    context_before: int = 8,
+    context_after: int = 8,
+    max_context_insns: int = 32,
+    context_variations: bool = False,
+    profile: str = "default",
+    min_insns: int = 6,
+    max_insns: int = 14,
+    require_unique: bool = True,
+    require_present_all: bool = True,
+    scan_range_base: str | None = None,
+    scan_range_versions: str | None = None,
+    explain: bool = False,
+    anchor_mode: str = "byte-offset",
+    structural_min_confidence: float = 0.60,
+    anchor_shift: int = 0,
+) -> dict[str, Any]:
+    """
+    Core synthesis function that returns structured data.
+    
+    This is the library-first implementation that takes typed parameters
+    and returns a dictionary result (not print output or exit codes).
+    
+    Args:
+        base_binary: Path to base PE executable
+        anchor_rva: Anchor RVA (if specified)
+        anchor_fo: Anchor file offset (if specified)
+        anchor_va: Anchor virtual address (if specified)
+        version_binaries: List of version binary paths for validation
+        align_mode: Alignment mode ("bytespan" or "anchor-rva")
+        seed_bytes: Bytes to extract for alignment seed
+        seed_scan: Seed scan scope ("section" or "module")
+        seed_allow_multi: Allow multiple seed matches
+        context_before: Instructions before anchor
+        context_after: Instructions after anchor
+        max_context_insns: Maximum total context instructions
+        context_variations: Enable context window variations
+        profile: Wildcarding profile
+        min_insns: Minimum instruction window size
+        max_insns: Maximum instruction window size
+        require_unique: Require unique match in each binary
+        require_present_all: Require presence in all versions
+        scan_range_base: Scan range for base binary
+        scan_range_versions: Scan range for version binaries
+        explain: Enable explainability trace
+        anchor_mode: Anchor mode ("byte-offset" or "structural")
+        structural_min_confidence: Minimum confidence for structural anchoring
+        anchor_shift: Anchor shift range (0 = disabled)
+        
+    Returns:
+        Dictionary with synthesis results (compatible with JSON output format)
+        
+    Raises:
+        AoBMasterError: If synthesis fails
+    """
     # Initialize trace collector (v2 feature, opt-in)
-    trace = TraceCollector(enabled=getattr(args, 'explain', False))
+    trace = TraceCollector(enabled=explain)
     warnings: list[AoBMasterWarning] = []
     
-    base_pe = PEFile(args.base)
-    versions = unique_preserve_order([str(p) for p in (args.versions or [])])
-    version_paths = [Path(p) for p in versions if Path(p) != args.base]
-
-    base_anchor_rva, base_anchor_fo, base_anchor_va = _resolve_anchor(base_pe, args)
+    base_pe = PEFile(base_binary)
+    version_paths = [Path(p) for p in (version_binaries or []) if Path(p) != base_binary]
+    
+    # Resolve anchor
+    if anchor_rva is not None:
+        rva = anchor_rva
+    elif anchor_fo is not None:
+        rva = base_pe.fo_to_rva(anchor_fo)
+    elif anchor_va is not None:
+        rva = base_pe.va_to_rva(anchor_va)
+    else:
+        raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "Missing anchor")
+    
+    base_anchor_rva = rva
+    base_anchor_fo = base_pe.rva_to_fo(rva)
+    base_anchor_va = base_pe.rva_to_va(rva)
     
     # Phase 6 (v2): Structural anchor resolution (OPT-IN, HIGH RISK)
     structural_context = None
-    anchor_mode = getattr(args, 'anchor_mode', 'byte-offset')
     
     if anchor_mode == 'structural':
         # Import here to avoid dependency when not using structural mode
-        from .structural import (
-            resolve_structural_anchor,
-            validate_structural_anchor,
-            get_structural_context
-        )
+        from .structural import get_structural_context
         
         structural_context = get_structural_context(base_pe, base_anchor_rva)
         
-        # Structural context is added to final output JSON, not trace
-        # (Adding to trace would require creating a StructuralAnchorEvent class)
-        
         # Validate structural anchor
-        min_confidence = getattr(args, 'structural_min_confidence', 0.60)
-        if structural_context["confidence"] < min_confidence:
+        if structural_context["confidence"] < structural_min_confidence:
             # Automatic fallback to byte-offset mode when confidence is too low
             warnings.append(AoBMasterWarning(
                 "structural_anchor_fallback",
-                f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {min_confidence:.2f}. "
+                f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {structural_min_confidence:.2f}. "
                 f"Falling back to byte-offset mode.",
                 {
                     "confidence": structural_context["confidence"],
-                    "min_confidence": min_confidence,
+                    "min_confidence": structural_min_confidence,
                     "warnings": structural_context["warnings"]
                 }
             ))
-            # Setting to None signals fallback to byte-offset anchor mode
             structural_context = None
         elif structural_context["warnings"]:
             for warning_msg in structural_context["warnings"]:
@@ -125,9 +189,9 @@ def run_synth(args: Any) -> int:
     
     # Trace anchor resolution
     trace.add(AnchorResolutionEvent(
-        input_rva=parse_hex_int(args.anchor_rva) if args.anchor_rva else None,
-        input_fo=parse_hex_int(args.anchor_fo) if args.anchor_fo else None,
-        input_va=parse_hex_int(args.anchor_va) if args.anchor_va else None,
+        input_rva=anchor_rva,
+        input_fo=anchor_fo,
+        input_va=anchor_va,
         resolved_fo=base_anchor_fo,
         resolved_rva=base_anchor_rva,
         section=base_pe.section_containing_rva(base_anchor_rva).name if base_pe.section_containing_rva(base_anchor_rva) else "unknown",
@@ -142,12 +206,11 @@ def run_synth(args: Any) -> int:
             {"anchor_rva": hex(base_anchor_rva)},
         )
 
-    # Instruction boundary recovery is defined as part of anchor handling; do it before bytespan alignment.
+    # Instruction boundary recovery
     original_fo = base_anchor_fo
     base_anchor_fo, w = resync_anchor_to_insn_start(base_pe, base_section, base_anchor_fo)
     if w:
         warnings.append(w)
-        # Trace resync event
         trace.add(AnchorResyncEvent(
             original_fo=original_fo,
             resynced_fo=base_anchor_fo,
@@ -157,26 +220,26 @@ def run_synth(args: Any) -> int:
     base_anchor_rva = base_pe.fo_to_rva(base_anchor_fo)
     base_anchor_va = base_pe.rva_to_va(base_anchor_rva)
 
+    # Align versions
     aligned = align_versions(
         base_pe=base_pe,
         base_anchor_fo=base_anchor_fo,
         base_anchor_rva=base_anchor_rva,
         base_anchor_section=base_section,
         version_paths=version_paths,
-        mode=args.align,
-        seed_bytes=args.seed_bytes,
-        seed_scan=args.seed_scan,
-        seed_allow_multi=_bool_arg(args.seed_allow_multi),
+        mode=align_mode,
+        seed_bytes=seed_bytes,
+        seed_scan=seed_scan,
+        seed_allow_multi=seed_allow_multi,
     )
     
     # Trace alignment events
     for aligned_anchor in aligned:
-        if aligned_anchor.path != str(args.base):
+        if aligned_anchor.path != base_binary:
             drift = aligned_anchor.anchor_rva - base_anchor_rva
-            # Determine ambiguity: seed_hits > 1 means multiple matches (ambiguous)
             ambiguity = aligned_anchor.seed_hits is not None and aligned_anchor.seed_hits > 1
             trace.add(AlignmentEvent(
-                mode=args.align,
+                mode=align_mode,
                 base_rva=base_anchor_rva,
                 version_path=str(aligned_anchor.path),
                 aligned_rva=aligned_anchor.anchor_rva,
@@ -184,51 +247,44 @@ def run_synth(args: Any) -> int:
                 ambiguity=ambiguity,
             ))
 
-    # After alignment, the "base" record is aligned[0] and may differ from initial FO
+    # After alignment
     base_aligned_fo = aligned[0].anchor_fo
     base_aligned_rva = aligned[0].anchor_rva
-    base_section = base_pe.section_containing_rva(base_aligned_rva)  # should exist
+    base_section = base_pe.section_containing_rva(base_aligned_rva)
     if not base_section:
         raise AoBMasterError(ExitCode.ANCHOR_FAILURE, "anchor_out_of_range", "Anchor not within any section")
 
-    # Anchor shifting: Generate alternative anchor offsets if enabled
-    anchor_shift_range = getattr(args, 'anchor_shift', 0)
-    shifted_anchors = [(base_aligned_fo, 0)]  # Default: just the original anchor
+    # Anchor shifting
+    shifted_anchors = [(base_aligned_fo, 0)]
     
-    if anchor_shift_range > 0:
+    if anchor_shift > 0:
         shifted_anchors = generate_shifted_anchors(
             base_pe,
             base_section,
             base_aligned_fo,
-            shift_range=anchor_shift_range,
-            max_context_insns=args.max_context_insns,
+            shift_range=anchor_shift,
+            max_context_insns=max_context_insns,
         )
         if len(shifted_anchors) > 1:
             warnings.append(
                 AoBMasterWarning(
                     kind="anchor_shift_enabled",
-                    message=f"Anchor shifting enabled: trying {len(shifted_anchors)} anchor positions (±{anchor_shift_range} instructions)",
-                    details={"shift_range": anchor_shift_range, "anchor_count": len(shifted_anchors)},
+                    message=f"Anchor shifting enabled: trying {len(shifted_anchors)} anchor positions (±{anchor_shift} instructions)",
+                    details={"shift_range": anchor_shift, "anchor_count": len(shifted_anchors)},
                 )
             )
 
-    # Context variations: generate candidates for multiple context windows if enabled
-    context_configs = [(args.context_before, args.context_after)]
-    if args.context_variations == "on":
-        # Add variations: forward-heavy, backward-heavy, and balanced
+    # Context variations
+    context_configs = [(context_before, context_after)]
+    if context_variations:
         context_configs.extend([
-            (0, 10),   # Forward only
-            (0, 15),   # Forward only (longer)
-            (5, 10),   # Balanced
-            (10, 5),   # Backward heavy
-            (12, 8),   # Slightly backward heavy
+            (0, 10), (0, 15), (5, 10), (10, 5), (12, 8),
         ])
 
     all_candidates = []
     
     # Try each shifted anchor
     for shifted_fo, shift_idx in shifted_anchors:
-        # For each anchor, try all context configurations
         for ctx_before, ctx_after in context_configs:
             try:
                 ctx = decode_anchor_context(
@@ -237,10 +293,9 @@ def run_synth(args: Any) -> int:
                     anchor_fo=shifted_fo,
                     context_before=ctx_before,
                     context_after=ctx_after,
-                    max_context_insns=args.max_context_insns,
+                    max_context_insns=max_context_insns,
                 )
             except Exception as e:
-                # If context decoding fails for a shifted anchor, skip it
                 warnings.append(
                     AoBMasterWarning(
                         kind="anchor_shift_decode_failed",
@@ -252,35 +307,29 @@ def run_synth(args: Any) -> int:
                 
             warnings.extend(list(ctx.warnings))
 
-            norm_ctx = normalize_context(ctx.insns, profile=args.profile)
+            norm_ctx = normalize_context(ctx.insns, profile=profile)
             candidates, cand_warnings = generate_candidates(
                 norm_ctx,
                 anchor_ctx_index=ctx.anchor_index,
-                min_insns=args.min_insns,
-                max_insns=args.max_insns,
+                min_insns=min_insns,
+                max_insns=max_insns,
             )
             warnings.extend(cand_warnings)
             all_candidates.extend(candidates)
 
-    # Use all_candidates from context variations and anchor shifting
     candidates = all_candidates
-
-    # Apply similarity-based deduplication to remove near-duplicate patterns
     candidates = deduplicate_candidates(candidates, threshold=0.75)
 
-    require_unique = _bool_arg(args.require_unique)
-    require_present_all = _bool_arg(args.require_present_all)
+    # Scan range defaults
+    scan_range_base_final = scan_range_base or "section"
+    scan_range_versions_final = scan_range_versions or ("module" if version_paths else "section")
 
-    # scan-range defaults: base=section, versions=module unless user explicitly sets --scan-range
-    scan_range_base = args.scan_range or "section"
-    scan_range_versions = args.scan_range or ("module" if version_paths else "section")
-
-    # Build PE objects for versions once.
-    pes: dict[Path, PEFile] = {args.base: base_pe}
+    # Build PE objects
+    pes: dict[Path, PEFile] = {base_binary: base_pe}
     for p in version_paths:
         pes[p] = PEFile(p)
 
-    # Drift metrics for confidence
+    # Drift metrics
     max_drift_rva = 0
     had_alignment_ambiguity = any(a.seed_hits and a.seed_hits > 1 for a in aligned[1:])
     for a in aligned[1:]:
@@ -298,11 +347,11 @@ def run_synth(args: Any) -> int:
             results.append(rec)
             continue
 
-        # Scan in base and versions
+        # Scan
         per_file: dict[str, Any] = {}
-        base_ranges = _scan_domain_ranges_for_anchor(base_pe, domain=scan_range_base, anchor_rva=base_aligned_rva)
+        base_ranges = _scan_domain_ranges_for_anchor(base_pe, domain=scan_range_base_final, anchor_rva=base_aligned_rva)
         base_hits = scan_ranges(base_ranges, c.pattern)
-        per_file[str(args.base)] = {"count": len(base_hits), "hits_fo": [hex(x) for x in base_hits]}
+        per_file[str(base_binary)] = {"count": len(base_hits), "hits_fo": [hex(x) for x in base_hits]}
 
         version_present = 0
         version_total = len(version_paths)
@@ -311,7 +360,7 @@ def run_synth(args: Any) -> int:
 
         for a in aligned[1:]:
             pe = pes[a.path]
-            v_ranges = _scan_domain_ranges_for_anchor(pe, domain=scan_range_versions, anchor_rva=a.anchor_rva)
+            v_ranges = _scan_domain_ranges_for_anchor(pe, domain=scan_range_versions_final, anchor_rva=a.anchor_rva)
             hits = scan_ranges(v_ranges, c.pattern)
             per_file[str(a.path)] = {"count": len(hits), "hits_fo": [hex(x) for x in hits], "drift_rva": a.drift_rva}
             if hits:
@@ -343,7 +392,7 @@ def run_synth(args: Any) -> int:
             results.append(rec)
             continue
 
-        # Score components
+        # Score
         if require_unique:
             U = 1.0
         else:
@@ -365,7 +414,6 @@ def run_synth(args: Any) -> int:
             had_alignment_ambiguity=had_alignment_ambiguity,
         )
         
-        # Trace scoring event
         trace.add(ScoringEvent(
             candidate_pattern=c.pattern.to_ce_string(),
             uniqueness=U,
@@ -381,7 +429,7 @@ def run_synth(args: Any) -> int:
         rec["score"] = sb.to_dict()
         results.append(rec)
 
-    # Rank valid results deterministically
+    # Rank
     def rank_key(r: dict[str, Any]) -> tuple:
         if not r.get("valid"):
             return (1, 0, "", 0)
@@ -394,35 +442,36 @@ def run_synth(args: Any) -> int:
 
     results.sort(key=rank_key)
 
+    # Build output
     out_obj: dict[str, Any] = {
         "ok": True,
         "version": __version__,
         "inputs": {
-            "base": str(args.base),
+            "base": str(base_binary),
             "versions": [str(p) for p in version_paths],
             "anchor": {
-                "anchor_rva": args.anchor_rva,
-                "anchor_fo": args.anchor_fo,
-                "anchor_va": args.anchor_va,
-                "anchor_mode": anchor_mode,  # v2 Phase 6
+                "anchor_rva": hex(anchor_rva) if anchor_rva is not None else None,
+                "anchor_fo": hex(anchor_fo) if anchor_fo is not None else None,
+                "anchor_va": hex(anchor_va) if anchor_va is not None else None,
+                "anchor_mode": anchor_mode,
             },
             "align": {
-                "mode": args.align,
-                "seed_bytes": args.seed_bytes,
-                "seed_scan": args.seed_scan,
-                "seed_allow_multi": _bool_arg(args.seed_allow_multi),
+                "mode": align_mode,
+                "seed_bytes": seed_bytes,
+                "seed_scan": seed_scan,
+                "seed_allow_multi": seed_allow_multi,
             },
             "context": {
-                "before": args.context_before,
-                "after": args.context_after,
-                "max_insns": args.max_context_insns,
+                "before": context_before,
+                "after": context_after,
+                "max_insns": max_context_insns,
             },
-            "profile": args.profile,
-            "candidate_windows": {"min_insns": args.min_insns, "max_insns": args.max_insns},
-            "scan_range": {"base": scan_range_base, "versions": scan_range_versions},
+            "profile": profile,
+            "candidate_windows": {"min_insns": min_insns, "max_insns": max_insns},
+            "scan_range": {"base": scan_range_base_final, "versions": scan_range_versions_final},
             "validation": {"require_unique": require_unique, "require_present_all": require_present_all},
         },
-        "hashes": {str(p): {"sha256": sha256_file(Path(p))} for p in [args.base, *version_paths]},
+        "hashes": {str(p): {"sha256": sha256_file(Path(p))} for p in [base_binary, *version_paths]},
         "anchor": {
             "resolved_base": {"fo": hex(base_aligned_fo), "rva": hex(base_aligned_rva), "va": hex(base_pe.rva_to_va(base_aligned_rva))},
             "section": base_section.name,
@@ -433,20 +482,16 @@ def run_synth(args: Any) -> int:
         "candidates": results,
     }
     
-    # Add structural context if structural mode was used (v2 Phase 6)
     if structural_context:
         out_obj["structural_anchor"] = structural_context
     
-    # Add trace data if explain mode is enabled (v2 feature)
     if trace.enabled:
         out_obj["trace"] = trace.to_dict()
-        # Add SignatureIR for top candidate if available
         top_candidates = [r for r in results if r.get("valid")]
         if top_candidates and top_candidates[0].get("insns"):
             try:
                 from .matcher import parse_ce_aob
                 top_cand = top_candidates[0]
-                # Convert top candidate to SignatureIR using proper parsing
                 pattern_bytes, pattern_mask = parse_ce_aob(top_cand.get("aob", ""))
                 sig_ir = convert_candidate_to_ir(
                     insns=top_cand.get("insns", []),
@@ -455,35 +500,93 @@ def run_synth(args: Any) -> int:
                     pattern_string=top_cand.get("aob", ""),
                     anchor_fo=base_aligned_fo,
                     anchor_rva=base_aligned_rva,
-                    profile=args.profile,
+                    profile=profile,
                     section_name=base_section.name,
                 )
                 out_obj["signature_ir"] = sig_ir.to_dict()
             except Exception:
-                # Silently skip IR conversion if it fails (best-effort)
                 pass
 
+    return out_obj
+
+
+def run_synth(args: Any) -> int:
+    """
+    CLI wrapper for synthesis that calls run_synthesis_core().
+    
+    This function converts CLI arguments to typed parameters,
+    calls the core logic, and formats/prints the output.
+    """
+    # Resolve anchor to get RVA/FO/VA
+    base_pe = PEFile(args.base)
+    base_anchor_rva, base_anchor_fo, base_anchor_va = _resolve_anchor(base_pe, args)
+    
+    # Prepare version binaries list
+    versions = unique_preserve_order([str(p) for p in (args.versions or [])])
+    version_paths = [Path(p) for p in versions if Path(p) != args.base]
+    
+    # Call core synthesis function
+    try:
+        out_obj = run_synthesis_core(
+            base_binary=args.base,
+            anchor_rva=base_anchor_rva,
+            anchor_fo=base_anchor_fo,
+            anchor_va=base_anchor_va,
+            version_binaries=version_paths,
+            align_mode=args.align,
+            seed_bytes=args.seed_bytes,
+            seed_scan=args.seed_scan,
+            seed_allow_multi=_bool_arg(args.seed_allow_multi),
+            context_before=args.context_before,
+            context_after=args.context_after,
+            max_context_insns=args.max_context_insns,
+            context_variations=(args.context_variations == "on"),
+            profile=args.profile,
+            min_insns=args.min_insns,
+            max_insns=args.max_insns,
+            require_unique=_bool_arg(args.require_unique),
+            require_present_all=_bool_arg(args.require_present_all),
+            scan_range_base=args.scan_range,
+            scan_range_versions=args.scan_range,
+            explain=getattr(args, 'explain', False),
+            anchor_mode=getattr(args, 'anchor_mode', 'byte-offset'),
+            structural_min_confidence=getattr(args, 'structural_min_confidence', 0.60),
+            anchor_shift=getattr(args, 'anchor_shift', 0),
+        )
+    except AoBMasterError:
+        raise
+    except Exception as e:
+        raise AoBMasterError(
+            ExitCode.INTERNAL_ERROR,
+            "synthesis_error",
+            f"Synthesis failed: {e}",
+            {}
+        )
+    
+    # Format and output results
     if args.format == "json":
         emit_json(out_obj)
     elif args.format == "text":
+        # Extract data from out_obj
+        results = out_obj.get("candidates", [])
+        trace_data = out_obj.get("trace")
+        sig_ir = out_obj.get("signature_ir")
+        anchor_data = out_obj.get("anchor", {}).get("resolved_base", {})
+        base_aligned_rva = int(anchor_data.get("rva", "0x0"), 16)
+        base_aligned_fo = int(anchor_data.get("fo", "0x0"), 16)
+        base_section_name = out_obj.get("anchor", {}).get("section", "unknown")
+        
         # Check if explain mode is enabled
-        if trace.enabled:
-            # Output explain format instead of normal text
-            sig_ir = out_obj.get("signature_ir")
-            if sig_ir:
-                from .signature_ir import SignatureIR
-                # Reconstruct SignatureIR from dict (simplified)
-                sig_ir_obj = None  # Would need full reconstruction
-            else:
-                sig_ir_obj = None
-            explain_lines = format_explain_output(trace.get_events(), sig_ir_obj)
+        if trace_data:
+            # Output explain format
+            explain_lines = format_explain_output(trace_data.get("events", []), None)
             emit_text(explain_lines)
         else:
             # Normal text output
             lines: list[str] = []
             lines.append("AoBMaster v1.1")
             lines.append(f"Base: {args.base}")
-            lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section.name}")
+            lines.append(f"Anchor: RVA {hex(base_aligned_rva)} (FO {hex(base_aligned_fo)}) Section {base_section_name}")
             lines.append("")
 
             top_n = max(1, args.top_n if hasattr(args, 'top_n') else 5)
@@ -498,6 +601,7 @@ def run_synth(args: Any) -> int:
                     lines.append(f"   {r.get('aob')}")
             emit_text(lines)
     elif args.format == "ce":
+        results = out_obj.get("candidates", [])
         module_name = Path(args.base).name
         top_n = max(1, args.top_n if hasattr(args, 'top_n') else 5)
         top = [r for r in results if r.get("valid")][:top_n]

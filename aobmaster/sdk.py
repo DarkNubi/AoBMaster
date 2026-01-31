@@ -411,54 +411,53 @@ class TemporalAnalyzer:
 # Internal function (called by SDK)
 def _run_synthesis(config: SynthesisConfig) -> SynthesisResult:
     """
-    Internal synthesis function. Calls CLI argument parser and run_synth.
+    Internal synthesis function that bridges SDK to core logic.
     
-    This is a bridge between SDK API and CLI implementation.
-    In a future refactor, CLI would call SDK directly (not vice versa).
+    This function calls run_synthesis_core() and converts the result
+    to a SynthesisResult object.
     """
-    # For now, this is a placeholder that would call the actual synth logic
-    # In production, we'd refactor synth.py to be library-first
-    
     # Import here to avoid circular dependency
-    from .synth import run_synth
-    from argparse import Namespace
+    from .synth import run_synthesis_core
     
-    # Convert config to argparse Namespace (CLI format)
-    args = Namespace(
-        base=config.base_binary,
-        anchor_rva=config.anchor_rva,
-        anchor_fo=config.anchor_fo,
-        anchor_va=config.anchor_va,
-        versions=config.version_binaries,
-        align=config.align_mode,
+    # Call core synthesis function
+    result_dict = run_synthesis_core(
+        base_binary=Path(config.base_binary),
+        anchor_rva=int(config.anchor_rva, 16) if config.anchor_rva else None,
+        anchor_fo=int(config.anchor_fo, 16) if config.anchor_fo else None,
+        anchor_va=int(config.anchor_va, 16) if config.anchor_va else None,
+        version_binaries=[Path(p) for p in config.version_binaries] if config.version_binaries else None,
+        align_mode=config.align_mode,
         seed_bytes=config.seed_bytes,
         seed_scan=config.seed_scan,
-        seed_allow_multi="true" if config.seed_allow_multi else "false",
+        seed_allow_multi=config.seed_allow_multi,
         context_before=config.context_before,
         context_after=config.context_after,
         max_context_insns=config.max_context_insns,
-        context_variations="on" if config.context_variations else "off",
+        context_variations=config.context_variations,
         profile=config.profile,
         min_insns=config.min_insns,
         max_insns=config.max_insns,
-        top_n=config.top_n,
-        require_unique="true" if config.require_unique else "false",
-        require_present_all="true" if config.require_present_all else "false",
-        scan_range=config.scan_range,
+        require_unique=config.require_unique,
+        require_present_all=config.require_present_all,
+        scan_range_base=config.scan_range,
+        scan_range_versions=config.scan_range,
         explain=config.explain,
         anchor_mode=config.anchor_mode,
         structural_min_confidence=config.structural_min_confidence,
         anchor_shift=config.anchor_shift,
-        format="json",  # Always JSON for SDK
     )
     
-    # Run synthesis (would need to capture JSON output, not write to stdout)
-    # This is a simplification - in production we'd refactor synth.py
-    # to return data instead of printing
-    
-    # For now, raise NotImplementedError to indicate refactoring needed
-    raise NotImplementedError(
-        "SDK is currently a placeholder. To use SDK functionality, "
-        "synth.py needs to be refactored to return data instead of printing. "
-        "This is a v2.1 task. For now, use CLI directly."
+    # Convert dict to SynthesisResult
+    return SynthesisResult(
+        ok=result_dict.get("ok", False),
+        version=result_dict.get("version", "2.0.0"),
+        candidates=result_dict.get("candidates", []),
+        warnings=result_dict.get("warnings", []),
+        errors=result_dict.get("errors", []),
+        anchor=result_dict.get("anchor", {}),
+        alignment=result_dict.get("alignment", []),
+        hashes=result_dict.get("hashes", {}),
+        trace=result_dict.get("trace"),
+        signature_ir=result_dict.get("signature_ir"),
+        structural_anchor=result_dict.get("structural_anchor"),
     )
