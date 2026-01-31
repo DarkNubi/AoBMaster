@@ -232,7 +232,7 @@ def run_test(args: Any) -> int:
             "ok": True,
             "summary": {
                 "total_tests": len(test_results),
-                "total": len(test_results),  # Backward compat
+                "total": len(test_results),  # DEPRECATED: Use total_tests instead (kept for backward compat with v2.0 tests)
                 "passed": passed_count,
                 "failed": failed_count,
             },

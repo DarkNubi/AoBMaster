@@ -100,13 +100,13 @@ def run_synth(args: Any) -> int:
         
         structural_context = get_structural_context(base_pe, base_anchor_rva)
         
-        # Note: Structural context is added to final output, not trace
-        # (Would require creating a StructuralAnchorEvent class)
+        # Structural context is added to final output JSON, not trace
+        # (Adding to trace would require creating a StructuralAnchorEvent class)
         
         # Validate structural anchor
         min_confidence = getattr(args, 'structural_min_confidence', 0.60)
         if structural_context["confidence"] < min_confidence:
-            # Fallback to byte-offset mode when confidence is too low
+            # Automatic fallback to byte-offset mode when confidence is too low
             warnings.append(AoBMasterWarning(
                 "structural_anchor_fallback",
                 f"Structural anchor confidence {structural_context['confidence']:.2f} below threshold {min_confidence:.2f}. "
@@ -117,7 +117,7 @@ def run_synth(args: Any) -> int:
                     "warnings": structural_context["warnings"]
                 }
             ))
-            # Clear structural_context to use byte-offset mode
+            # Setting to None signals fallback to byte-offset anchor mode
             structural_context = None
         elif structural_context["warnings"]:
             for warning_msg in structural_context["warnings"]:
