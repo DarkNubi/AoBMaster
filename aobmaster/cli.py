@@ -12,6 +12,7 @@ from .synth import run_synth
 from .db_commands import run_db
 from .test_command import run_test
 from .analyze_command import run_analyze
+from .diagnose_command import run_diagnose
 
 
 def _add_common_output_args(p: argparse.ArgumentParser) -> None:
@@ -165,6 +166,12 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--db", type=Path, required=True, help="Database path.")
     analyze.add_argument("--signature-id", type=str, help="Analyze specific signature (default: all).")
     _add_common_output_args(analyze)
+    
+    # Diagnose command (v2 feature - signature families)
+    diagnose = sub.add_parser("diagnose", help="Diagnose signature family lineage (v2 feature).")
+    diagnose.add_argument("--db", type=Path, required=True, help="Database path.")
+    diagnose.add_argument("--signature-id", type=str, required=True, help="Signature ID to diagnose.")
+    _add_common_output_args(diagnose)
 
     return parser
 
@@ -188,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_test(args)
         if args.cmd == "analyze":
             return run_analyze(args)
+        if args.cmd == "diagnose":
+            return run_diagnose(args)
         raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown command: {args.cmd}")
     except AoBMasterError as e:
         # Best-effort: return machine-readable JSON if requested.

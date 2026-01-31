@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 
 # Database schema version for migrations
-DB_SCHEMA_VERSION = 1
+DB_SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -31,6 +31,9 @@ class SignatureRecord:
     author: Optional[str]
     version_range: Optional[str]  # e.g., "1.0.0-1.5.3"
     metadata: dict[str, Any]  # JSON metadata (SignatureIR, etc.)
+    parent_id: Optional[str] = None  # Parent signature (if evolved from another)
+    deprecated: bool = False  # True if signature is known to be broken
+    deprecation_reason: Optional[str] = None  # Why signature was deprecated
     
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -43,6 +46,9 @@ class SignatureRecord:
             "author": self.author,
             "version_range": self.version_range,
             "metadata": self.metadata,
+            "parent_id": self.parent_id,
+            "deprecated": self.deprecated,
+            "deprecation_reason": self.deprecation_reason,
         }
 
 
@@ -136,6 +142,28 @@ class SignatureDatabase:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_test_results_signature ON test_results(signature_id)
             """)
+        
+        if from_version < 2:
+            # Schema version 2: Add signature families
+            cursor.execute("""
+                ALTER TABLE signatures ADD COLUMN parent_id TEXT
+            """)
+            
+            cursor.execute("""
+                ALTER TABLE signatures ADD COLUMN deprecated INTEGER DEFAULT 0
+            """)
+            
+            cursor.execute("""
+                ALTER TABLE signatures ADD COLUMN deprecation_reason TEXT
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signatures_parent ON signatures(parent_id)
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_test_results_signature ON test_results(signature_id)
+            """)
     
     def save_signature(self, signature: SignatureRecord) -> None:
         """
@@ -148,8 +176,9 @@ class SignatureDatabase:
         
         cursor.execute("""
             REPLACE INTO signatures (id, name, pattern, anchor_rva, binary_hash, 
-                                    created_at, author, version_range, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    created_at, author, version_range, metadata_json,
+                                    parent_id, deprecated, deprecation_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             signature.id,
             signature.name,
@@ -160,6 +189,9 @@ class SignatureDatabase:
             signature.author,
             signature.version_range,
             json.dumps(signature.metadata, sort_keys=True),
+            signature.parent_id,
+            1 if signature.deprecated else 0,
+            signature.deprecation_reason,
         ))
         
         conn.commit()
@@ -185,6 +217,9 @@ class SignatureDatabase:
             author=row["author"],
             version_range=row["version_range"],
             metadata=json.loads(row["metadata_json"]),
+            parent_id=row.get("parent_id"),
+            deprecated=bool(row.get("deprecated", 0)),
+            deprecation_reason=row.get("deprecation_reason"),
         )
     
     def list_signatures(self, name_filter: Optional[str] = None) -> list[SignatureRecord]:
@@ -215,6 +250,9 @@ class SignatureDatabase:
                 author=row["author"],
                 version_range=row["version_range"],
                 metadata=json.loads(row["metadata_json"]),
+                parent_id=row.get("parent_id"),
+                deprecated=bool(row.get("deprecated", 0)),
+                deprecation_reason=row.get("deprecation_reason"),
             ))
         
         return results
@@ -232,6 +270,73 @@ class SignatureDatabase:
         conn.commit()
         
         return cursor.rowcount > 0
+    
+    def get_signature_family(self, signature_id: str) -> list[SignatureRecord]:
+        """
+        Get entire signature family (parent chain and children).
+        
+        Returns list ordered: root → parent → this → children
+        """
+        sig = self.get_signature(signature_id)
+        if not sig:
+            return []
+        
+        family = []
+        
+        # Walk up to root
+        current = sig
+        while current.parent_id:
+            parent = self.get_signature(current.parent_id)
+            if not parent:
+                break
+            family.insert(0, parent)
+            current = parent
+        
+        # Add current signature
+        family.append(sig)
+        
+        # Get all children (recursive)
+        def get_children(parent_id: str) -> list[SignatureRecord]:
+            conn = self._connect()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM signatures WHERE parent_id = ?", (parent_id,))
+            children = []
+            for row in cursor.fetchall():
+                child = SignatureRecord(
+                    id=row["id"],
+                    name=row["name"],
+                    pattern=row["pattern"],
+                    anchor_rva=row["anchor_rva"],
+                    binary_hash=row["binary_hash"],
+                    created_at=row["created_at"],
+                    author=row["author"],
+                    version_range=row["version_range"],
+                    metadata=json.loads(row["metadata_json"]),
+                    parent_id=row.get("parent_id"),
+                    deprecated=bool(row.get("deprecated", 0)),
+                    deprecation_reason=row.get("deprecation_reason"),
+                )
+                children.append(child)
+                # Recursive: get children of children
+                children.extend(get_children(child.id))
+            return children
+        
+        family.extend(get_children(sig.id))
+        
+        return family
+    
+    def deprecate_signature(self, signature_id: str, reason: str) -> None:
+        """Mark signature as deprecated (but don't delete it)."""
+        conn = self._connect()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE signatures 
+            SET deprecated = 1, deprecation_reason = ?
+            WHERE id = ?
+        """, (reason, signature_id))
+        
+        conn.commit()
     
     def record_test_result(
         self,
