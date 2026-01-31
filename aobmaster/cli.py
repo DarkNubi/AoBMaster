@@ -11,6 +11,7 @@ from .smart import run_smart
 from .synth import run_synth
 from .db_commands import run_db
 from .test_command import run_test
+from .analyze_command import run_analyze
 
 
 def _add_common_output_args(p: argparse.ArgumentParser) -> None:
@@ -158,6 +159,12 @@ def build_parser() -> argparse.ArgumentParser:
     test.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1).")
     test.add_argument("--record", action="store_true", help="Record results in database.")
     _add_common_output_args(test)
+    
+    # Analyze command (v2 feature - temporal analysis)
+    analyze = sub.add_parser("analyze", help="Analyze signature stability using historical data (v2 feature).")
+    analyze.add_argument("--db", type=Path, required=True, help="Database path.")
+    analyze.add_argument("--signature-id", type=str, help="Analyze specific signature (default: all).")
+    _add_common_output_args(analyze)
 
     return parser
 
@@ -179,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_db(args)
         if args.cmd == "test":
             return run_test(args)
+        if args.cmd == "analyze":
+            return run_analyze(args)
         raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown command: {args.cmd}")
     except AoBMasterError as e:
         # Best-effort: return machine-readable JSON if requested.
