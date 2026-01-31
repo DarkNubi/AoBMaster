@@ -7,51 +7,25 @@ These tests verify that the SDK works programmatically after synth.py refactorin
 import pytest
 from pathlib import Path
 from aobmaster.sdk import Synthesizer, SynthesisResult, SynthesisConfig
+from .conftest import build_minimal_pe64
 
 
 def test_sdk_synthesizer_basic(tmp_path):
     """Test basic SDK synthesis using Synthesizer class."""
-    # Create a minimal test binary (from test_synth_basic.py)
+    # Create a minimal test binary using proper PE builder
     test_bin = tmp_path / "test.exe"
-    
-    # Create minimal PE (DOS header + PE header + one section with code)
-    dos_stub = b"MZ" + b"\x90" * 58 + b"\x80\x00\x00\x00"  # e_lfanew at offset 60
-    pe_header = (
-        b"PE\x00\x00" +  # Signature
-        b"\x64\x86" +  # Machine (x64)
-        b"\x01\x00" +  # NumberOfSections
-        b"\x00" * 12 +  # Timestamp, etc.
-        b"\xF0\x00" +  # SizeOfOptionalHeader
-        b"\x22\x00" +  # Characteristics
-        b"\x0B\x02" +  # Magic (PE32+)
-        b"\x00" * 222  # Rest of optional header
-    )
-    
-    section_header = (
-        b".text\x00\x00\x00" +  # Name
-        b"\x00\x10\x00\x00" +  # VirtualSize
-        b"\x00\x10\x00\x00" +  # VirtualAddress
-        b"\x00\x02\x00\x00" +  # SizeOfRawData (512 bytes)
-        b"\x00\x02\x00\x00" +  # PointerToRawData
-        b"\x00" * 12 +  # Relocations, etc.
-        b"\x20\x00\x00\x60"  # Characteristics (CODE | EXECUTE | READ)
-    )
     
     # Code section with recognizable pattern
     code = (
-        b"\x48\x89\x5C\x24\x08" +  # mov [rsp+8], rbx
-        b"\x48\x89\x74\x24\x10" +  # mov [rsp+10], rsi
-        b"\x48\x8B\x05\x12\x34\x56\x78" +  # mov rax, [rip+0x78563412] <-- anchor here
-        b"\x85\xC0" +  # test eax, eax
-        b"\x00" * 480  # Padding
+        b"\x48\x89\x5C\x24\x08"          # mov [rsp+8], rbx
+        b"\x48\x89\x74\x24\x10"          # mov [rsp+10], rsi
+        b"\x48\x8B\x05\x12\x34\x56\x78"  # mov rax, [rip+0x78563412] <-- anchor here
+        b"\x85\xC0"                      # test eax, eax
+        + b"\x00" * 480                  # Padding
     )
     
-    # Write PE file
-    with open(test_bin, "wb") as f:
-        f.write(dos_stub)
-        f.write(pe_header)
-        f.write(section_header)
-        f.write(code)
+    # Write proper PE file
+    test_bin.write_bytes(build_minimal_pe64(text=code))
     
     # Test SDK
     synth = Synthesizer(test_bin)
@@ -75,24 +49,17 @@ def test_sdk_synthesizer_basic(tmp_path):
 
 def test_sdk_synthesis_result_methods(tmp_path):
     """Test SynthesisResult helper methods."""
-    # Create test binary
+    # Create test binary using proper PE builder
     test_bin = tmp_path / "test.exe"
-    dos_stub = b"MZ" + b"\x90" * 58 + b"\x80\x00\x00\x00"
-    pe_header = (
-        b"PE\x00\x00" + b"\x64\x86" + b"\x01\x00" + b"\x00" * 12 +
-        b"\xF0\x00" + b"\x22\x00" + b"\x0B\x02" + b"\x00" * 222
-    )
-    section_header = (
-        b".text\x00\x00\x00" + b"\x00\x10\x00\x00" + b"\x00\x10\x00\x00" +
-        b"\x00\x02\x00\x00" + b"\x00\x02\x00\x00" + b"\x00" * 12 + b"\x20\x00\x00\x60"
-    )
     code = (
-        b"\x48\x89\x5C\x24\x08" + b"\x48\x89\x74\x24\x10" +
-        b"\x48\x8B\x05\x12\x34\x56\x78" + b"\x85\xC0" + b"\x00" * 480
+        b"\x48\x89\x5C\x24\x08"          # mov [rsp+8], rbx
+        b"\x48\x89\x74\x24\x10"          # mov [rsp+10], rsi
+        b"\x48\x8B\x05\x12\x34\x56\x78"  # mov rax, [rip+0x78563412]
+        b"\x85\xC0"                      # test eax, eax
+        + b"\x00" * 480                  # Padding
     )
     
-    with open(test_bin, "wb") as f:
-        f.write(dos_stub + pe_header + section_header + code)
+    test_bin.write_bytes(build_minimal_pe64(text=code))
     
     synth = Synthesizer(test_bin)
     result = synth.generate(anchor_rva="0x100A")
@@ -118,22 +85,15 @@ def test_sdk_synthesis_result_methods(tmp_path):
 def test_sdk_with_explain_mode(tmp_path):
     """Test SDK with explainability mode enabled."""
     test_bin = tmp_path / "test.exe"
-    dos_stub = b"MZ" + b"\x90" * 58 + b"\x80\x00\x00\x00"
-    pe_header = (
-        b"PE\x00\x00" + b"\x64\x86" + b"\x01\x00" + b"\x00" * 12 +
-        b"\xF0\x00" + b"\x22\x00" + b"\x0B\x02" + b"\x00" * 222
-    )
-    section_header = (
-        b".text\x00\x00\x00" + b"\x00\x10\x00\x00" + b"\x00\x10\x00\x00" +
-        b"\x00\x02\x00\x00" + b"\x00\x02\x00\x00" + b"\x00" * 12 + b"\x20\x00\x00\x60"
-    )
     code = (
-        b"\x48\x89\x5C\x24\x08" + b"\x48\x89\x74\x24\x10" +
-        b"\x48\x8B\x05\x12\x34\x56\x78" + b"\x85\xC0" + b"\x00" * 480
+        b"\x48\x89\x5C\x24\x08"          # mov [rsp+8], rbx
+        b"\x48\x89\x74\x24\x10"          # mov [rsp+10], rsi
+        b"\x48\x8B\x05\x12\x34\x56\x78"  # mov rax, [rip+0x78563412]
+        b"\x85\xC0"                      # test eax, eax
+        + b"\x00" * 480                  # Padding
     )
     
-    with open(test_bin, "wb") as f:
-        f.write(dos_stub + pe_header + section_header + code)
+    test_bin.write_bytes(build_minimal_pe64(text=code))
     
     synth = Synthesizer(test_bin)
     result = synth.generate(anchor_rva="0x100A", explain=True)
