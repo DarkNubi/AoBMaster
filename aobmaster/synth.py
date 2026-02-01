@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .align import align_versions
+from .align import AlignedAnchor, align_versions
 from .anchor_shift import generate_shifted_anchors
 from .candidates import Candidate, deduplicate_candidates, generate_candidates
 from .disasm import decode_anchor_context, resync_anchor_to_insn_start
@@ -81,6 +82,7 @@ def run_synthesis_core(
     anchor_fo: int | None = None,
     anchor_va: int | None = None,
     version_binaries: list[Path] | None = None,
+    version_anchors: list[tuple[Path, int]] | None = None,
     align_mode: str = "bytespan",
     seed_bytes: int = 32,
     seed_scan: str = "section",
@@ -113,6 +115,8 @@ def run_synthesis_core(
         anchor_fo: Anchor file offset (if specified)
         anchor_va: Anchor virtual address (if specified)
         version_binaries: List of version binary paths for validation
+        version_anchors: Optional explicit version anchor RVAs as (path, rva) pairs. When provided,
+            `align_versions()` is skipped and the provided RVAs are treated as authoritative.
         align_mode: Alignment mode ("bytespan" or "anchor-rva")
         seed_bytes: Bytes to extract for alignment seed
         seed_scan: Seed scan scope ("section" or "module")

@@ -1,0 +1,5 @@
+basic single file:
+python -m aobmaster synth --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.247.2\MapleStory.exe" --anchor-rva 0x5189C01 --format ce
+
+2 file:
+python -m aobmaster synth --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.247.2\MapleStory.exe" --anchor-rva 0x5189C01 --versions "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.246.2\MapleStory.exe" --format ce

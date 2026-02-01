@@ -9,6 +9,8 @@ from .info import run_info
 from .scan import run_scan
 from .smart import run_smart
 from .synth import run_synth
+from .locate_command import run_locate
+from .xref_command import run_xref
 from .db_commands import run_db
 from .test_command import run_test
 from .analyze_command import run_analyze
@@ -37,6 +39,18 @@ def build_parser() -> argparse.ArgumentParser:
     anchor.add_argument("--anchor-fo", type=str, help="Anchor file offset (hex).")
     anchor.add_argument("--anchor-va", type=str, help="Anchor virtual address (hex).")
     synth.add_argument("--versions", type=Path, nargs="*", default=[], help="Additional version binaries.")
+    synth.add_argument(
+        "--versions-map",
+        type=Path,
+        default=None,
+        help="JSON file mapping version binaries to their explicit anchor RVAs (bypasses --align/seed alignment).",
+    )
+    synth.add_argument(
+        "--version-anchor",
+        action="append",
+        default=[],
+        help='Repeatable explicit version anchor in the form "PATH@0xRVA" (bypasses --align/seed alignment).',
+    )
     synth.add_argument(
         "--anchor-shift",
         type=int,
@@ -107,6 +121,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     _add_common_output_args(synth)
+
+    locate = sub.add_parser("locate", help="Locate (guess) the anchor RVA in a target binary using synthesized AoB candidates.")
+    locate.add_argument("--base", type=Path, required=True, help="Base PE x64 binary (.exe/.dll).")
+    locate_anchor = locate.add_mutually_exclusive_group(required=True)
+    locate_anchor.add_argument("--anchor-rva", type=str, help="Anchor RVA in the base binary (hex).")
+    locate_anchor.add_argument("--anchor-fo", type=str, help="Anchor file offset in the base binary (hex).")
+    locate_anchor.add_argument("--anchor-va", type=str, help="Anchor virtual address in the base binary (hex).")
+    locate.add_argument("--target", type=Path, nargs="+", required=True, help="Target binary/binaries to locate the anchor in.")
+    locate.add_argument("--candidate-limit", type=int, default=20, help="How many base candidates to scan in each target (default: 20).")
+    locate.add_argument("--scan-range", choices=["section", "module"], default="module")
+    locate.add_argument("--section", type=str, default=None, help="Section name when --scan-range=section (e.g., .text).")
+    locate.add_argument("--allow-multiple", action="store_true", help="Do not discard candidates that match multiple times; penalize instead.")
+    locate.add_argument("--top-n", type=int, default=10, help="Number of top results to return per target (default: 10).")
+    # Reuse candidate generation knobs from synth (subset)
+    locate.add_argument("--profile", choices=["minimal", "default", "strict", "balanced", "aggressive", "stack-only", "global-only", "memory-heavy"], default="default")
+    locate.add_argument("--context-before", type=int, default=8)
+    locate.add_argument("--context-after", type=int, default=8)
+    locate.add_argument("--max-context-insns", type=int, default=32)
+    locate.add_argument("--context-variations", choices=["off", "on"], default="off")
+    locate.add_argument("--min-insns", type=int, default=6)
+    locate.add_argument("--max-insns", type=int, default=14)
+    locate.add_argument("--anchor-shift", type=int, default=0)
+    locate.add_argument("--explain", action="store_true", help="Include extra diagnostic details in JSON output.")
+    _add_common_output_args(locate)
+
+    xref = sub.add_parser("xref", help="Find call/jmp xrefs to a target RVA/VA/FO.")
+    xref.add_argument("--file", type=Path, required=True, help="Target PE binary (.exe/.dll).")
+    to = xref.add_mutually_exclusive_group(required=True)
+    to.add_argument("--to-rva", type=str, help="Destination RVA (hex).")
+    to.add_argument("--to-fo", type=str, help="Destination file offset (hex).")
+    to.add_argument("--to-va", type=str, help="Destination virtual address (hex).")
+    xref.add_argument("--type", choices=["call", "jmp", "branch", "all"], default="call", help="Reference type filter (default: call).")
+    xref.add_argument("--scan-range", choices=["section", "module"], default="module")
+    xref.add_argument("--section", type=str, default=None, help="Section name when --scan-range=section (e.g., .text).")
+    xref.add_argument("--limit", type=int, default=200, help="Maximum refs to return (default: 200).")
+    _add_common_output_args(xref)
 
     # Smart analyze command
     smart = sub.add_parser("smart", help="Analyze binary region and suggest stable anchor points.")
@@ -207,6 +257,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "synth":
             return run_synth(args)
+        if args.cmd == "locate":
+            return run_locate(args)
+        if args.cmd == "xref":
+            return run_xref(args)
         if args.cmd == "smart":
             return run_smart(args)
         if args.cmd == "scan":
