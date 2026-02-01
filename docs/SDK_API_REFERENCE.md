@@ -67,6 +67,7 @@ def generate(
     anchor_fo: Optional[str] = None,
     anchor_va: Optional[str] = None,
     version_binaries: Optional[List[Path]] = None,
+    version_anchors: Optional[List[tuple[Path, str]]] = None,
     profile: str = "balanced",
     explain: bool = False,
     require_unique: bool = True
@@ -78,6 +79,7 @@ def generate(
 - `anchor_fo` (str, optional): Anchor file offset in hex
 - `anchor_va` (str, optional): Anchor virtual address in hex
 - `version_binaries` (List[Path], optional): Additional binary versions for multi-version synthesis
+- `version_anchors` (List[tuple[Path, str]], optional): Explicit (binary, anchor_rva) pairs to bypass alignment
 - `profile` (str): Synthesis profile - "specific", "balanced", or "generic" (default: "balanced")
 - `explain` (bool): Enable explainability mode (default: False)
 - `require_unique` (bool): Require unique match (default: True)
@@ -94,6 +96,13 @@ result = synth.generate(anchor_rva="0x1000")
 result = synth.generate(
     anchor_rva="0x1000",
     version_binaries=[Path("game_v1.1.exe"), Path("game_v1.2.exe")],
+    profile="specific"
+)
+
+# Multi-version synthesis with explicit anchors
+result = synth.generate(
+    anchor_rva="0x1000",
+    version_anchors=[(Path("game_v1.1.exe"), "0x1200"), (Path("game_v1.2.exe"), "0x1300")],
     profile="specific"
 )
 

@@ -152,11 +152,33 @@ def build_parser() -> argparse.ArgumentParser:
     to.add_argument("--to-rva", type=str, help="Destination RVA (hex).")
     to.add_argument("--to-fo", type=str, help="Destination file offset (hex).")
     to.add_argument("--to-va", type=str, help="Destination virtual address (hex).")
-    xref.add_argument("--type", choices=["call", "jmp", "branch", "all"], default="call", help="Reference type filter (default: call).")
+    xref.add_argument(
+        "--type",
+        choices=["call", "jmp", "branch", "all", "call,jmp"],
+        default="call,jmp",
+        help="Reference type filter (default: call,jmp).",
+    )
     xref.add_argument("--scan-range", choices=["section", "module"], default="module")
     xref.add_argument("--section", type=str, default=None, help="Section name when --scan-range=section (e.g., .text).")
     xref.add_argument("--limit", type=int, default=200, help="Maximum refs to return (default: 200).")
     _add_common_output_args(xref)
+
+    refs = sub.add_parser("refs", help="Alias for xref (call/jmp xrefs).")
+    refs.add_argument("--file", type=Path, required=True, help="Target PE binary (.exe/.dll).")
+    to_alias = refs.add_mutually_exclusive_group(required=True)
+    to_alias.add_argument("--to-rva", type=str, help="Destination RVA (hex).")
+    to_alias.add_argument("--to-fo", type=str, help="Destination file offset (hex).")
+    to_alias.add_argument("--to-va", type=str, help="Destination virtual address (hex).")
+    refs.add_argument(
+        "--type",
+        choices=["call", "jmp", "branch", "all", "call,jmp"],
+        default="call,jmp",
+        help="Reference type filter (default: call,jmp).",
+    )
+    refs.add_argument("--scan-range", choices=["section", "module"], default="module")
+    refs.add_argument("--section", type=str, default=None, help="Section name when --scan-range=section (e.g., .text).")
+    refs.add_argument("--limit", type=int, default=200, help="Maximum refs to return (default: 200).")
+    _add_common_output_args(refs)
 
     # Smart analyze command
     smart = sub.add_parser("smart", help="Analyze binary region and suggest stable anchor points.")
@@ -261,6 +283,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_locate(args)
         if args.cmd == "xref":
             return run_xref(args)
+        if args.cmd == "refs":
+            return run_xref(args)
         if args.cmd == "smart":
             return run_smart(args)
         if args.cmd == "scan":
@@ -307,4 +331,3 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"ERROR[{int(ExitCode.INTERNAL_ERROR)}] internal_error: {e}")
         return int(ExitCode.INTERNAL_ERROR)
-
