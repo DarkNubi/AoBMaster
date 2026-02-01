@@ -15,7 +15,10 @@ def sha256_file(path: Path) -> str:
 
 
 def stable_json_dumps(obj: Any) -> str:
-    return json.dumps(obj, ensure_ascii=False, sort_keys=True, indent=2)
+    # Use ASCII-only JSON for portability on Windows consoles/pipes.
+    # Non-ASCII characters are escaped as \\uXXXX, preventing UnicodeEncodeError
+    # when stdout is using a legacy code page.
+    return json.dumps(obj, ensure_ascii=True, sort_keys=True, indent=2)
 
 
 def clamp01(x: float) -> float:

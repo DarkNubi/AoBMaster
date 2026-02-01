@@ -26,8 +26,10 @@ class Section:
     characteristics: int
 
     def contains_rva(self, rva: int) -> bool:
-        # Use virtual_size when available; fall back to raw_size.
-        size = self.virtual_size if self.virtual_size else self.raw_size
+        # For RVA↔FO mapping, treat the section's effective span as
+        # max(VirtualSize, SizeOfRawData) to avoid false out-of-range errors
+        # near section ends.
+        size = max(self.virtual_size, self.raw_size)
         return self.virtual_address <= rva < self.virtual_address + size
 
     def contains_fo(self, fo: int) -> bool:

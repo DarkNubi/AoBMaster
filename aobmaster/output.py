@@ -6,13 +6,21 @@ from typing import Any
 from .util import stable_json_dumps
 
 
+def _safe_write(s: str) -> None:
+    try:
+        sys.stdout.write(s)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "utf-8"
+        sys.stdout.buffer.write(s.encode(enc, errors="backslashreplace"))
+
+
 def emit_json(obj: Any) -> None:
-    sys.stdout.write(stable_json_dumps(obj))
-    sys.stdout.write("\n")
+    _safe_write(stable_json_dumps(obj))
+    _safe_write("\n")
 
 
 def emit_text(lines: list[str]) -> None:
     for line in lines:
-        sys.stdout.write(line)
-        sys.stdout.write("\n")
+        _safe_write(line)
+        _safe_write("\n")
 

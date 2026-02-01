@@ -31,11 +31,32 @@ const createWindow = () => {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       contextIsolation: true,
       nodeIntegration: false,
+      // The preload script uses Node (`require('electron')`) and is required for
+      // the renderer to access the secure IPC bridge. Explicitly disable the
+      // Chromium sandbox so preload has Node globals like `__dirname`.
+      sandbox: false,
     },
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('Renderer failed to load:', {
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
+
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levelName = Number(level) === 2 ? 'warn' : Number(level) === 3 ? 'error' : 'log';
+    console[levelName]('Renderer console:', { message, sourceId, line });
   });
 
   // and load the index.html of the app.
   mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+
+  if (!app.isPackaged) {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
 };
 
 const resolveWorkerPath = () => {

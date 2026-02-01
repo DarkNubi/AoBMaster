@@ -41,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--anchor-shift",
         type=int,
         default=0,
-        help="Try anchor ±N instructions to find stable regions (0=off, N=shift range). Example: 2 tries ±2 instructions."
+        help="Try anchor +/-N instructions to find stable regions (0=off, N=shift range). Example: 2 tries +/-2 instructions."
     )
 
     synth.add_argument("--align", choices=["anchor-rva", "bytespan"], default="bytespan")

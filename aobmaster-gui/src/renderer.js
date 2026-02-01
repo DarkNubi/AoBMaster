@@ -318,6 +318,16 @@ const openFilePicker = async () => {
   document.getElementById('base-binary').value = dialogResult.filePaths[0];
 };
 
+const openVersionBinariesPicker = async () => {
+  const dialogResult = await window.aobmaster.openFileDialog({
+    properties: ['openFile', 'multiSelections'],
+  });
+  if (dialogResult.canceled || !dialogResult.filePaths.length) {
+    return;
+  }
+  document.getElementById('version-binaries').value = dialogResult.filePaths.join(', ');
+};
+
 const renderSignatureList = () => {
   const list = document.getElementById('signature-list');
   list.innerHTML = '';
@@ -682,6 +692,31 @@ const runAnalyze = async () => {
 };
 
 const bindEvents = () => {
+  document.querySelectorAll('.nav-item').forEach((button) => {
+    button.addEventListener('click', (e) => {
+      const target = e.currentTarget;
+      const section = target?.dataset?.section;
+      if (!section) {
+        return;
+      }
+
+      document.querySelectorAll('.nav-item').forEach((item) => item.classList.remove('active'));
+      target.classList.add('active');
+
+      if (section === 'overview') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      const sectionId =
+        section === 'temporal' ? 'section-temporal' : `section-${section}`;
+      const destination = document.getElementById(sectionId);
+      if (destination) {
+        destination.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+
   document.getElementById('mutation-toggle').addEventListener('change', (e) => {
     toggleMutationMode(e.target.checked);
   });
@@ -693,6 +728,7 @@ const bindEvents = () => {
   document.getElementById('run-synthesis').addEventListener('click', runSynthesis);
   document.getElementById('cancel-synthesis').addEventListener('click', cancelSdk);
   document.getElementById('pick-base-binary').addEventListener('click', openFilePicker);
+  document.getElementById('pick-version-binaries').addEventListener('click', openVersionBinariesPicker);
   document.getElementById('compare-cli').addEventListener('click', compareCliParity);
   document.getElementById('db-list').addEventListener('click', runSignatureList);
   document.getElementById('db-query').addEventListener('click', runSignatureQuery);

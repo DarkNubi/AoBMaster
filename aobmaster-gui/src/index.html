@@ -35,11 +35,11 @@
       <div class="layout">
         <aside class="sidebar">
           <nav class="nav">
-            <button class="nav-item active">Overview</button>
-            <button class="nav-item">Synthesis</button>
-            <button class="nav-item">Signatures</button>
-            <button class="nav-item">Tests</button>
-            <button class="nav-item">Temporal</button>
+            <button class="nav-item active" data-section="overview">Overview</button>
+            <button class="nav-item" data-section="synthesis">Synthesis</button>
+            <button class="nav-item" data-section="signatures">Signatures</button>
+            <button class="nav-item" data-section="tests">Tests</button>
+            <button class="nav-item" data-section="temporal">Temporal</button>
           </nav>
           <div class="panel">
             <h3>Audit Log</h3>
@@ -55,7 +55,7 @@
             <div class="banner" id="mutation-banner">Read-only mode (mutations disabled)</div>
             <div class="banner warning" id="experimental-banner">Experimental features disabled</div>
           </div>
-          <section class="section">
+          <section class="section" id="section-synthesis">
             <div class="section-header">
               <h2>Synthesis Workspace</h2>
               <p>Configure synthesis parameters explicitly and generate stable signatures.</p>
@@ -78,7 +78,10 @@
                 <label>Anchor Value <span class="hint">Hex (0x...)</span></label>
                 <input id="anchor-value" placeholder="0x1000" />
                 <label>Version Binaries <span class="hint">Comma separated</span></label>
-                <input id="version-binaries" />
+                <div class="input-row">
+                  <input id="version-binaries" placeholder="/path/to/version1.exe, /path/to/version2.exe" />
+                  <button id="pick-version-binaries" class="secondary" title="Select one or more version binaries">Pick</button>
+                </div>
                 <label>Align Mode</label>
                 <select id="align-mode">
                   <option value="bytespan">bytespan</option>
@@ -178,7 +181,7 @@
               </div>
             </div>
           </section>
-          <section class="section">
+          <section class="section" id="section-signatures">
             <div class="section-header">
               <h2>Signature Database</h2>
               <p>Browse, query, and export signatures without hidden defaults.</p>
@@ -229,7 +232,7 @@
               </div>
             </div>
           </section>
-          <section class="section">
+          <section class="section" id="section-tests">
             <div class="section-header">
               <h2>Testing &amp; Temporal Analysis</h2>
               <p>Execute test suites and review stability analytics.</p>
@@ -250,6 +253,7 @@
                 <pre id="test-results"></pre>
               </div>
               <div class="card">
+                <div id="section-temporal"></div>
                 <h3>Temporal Analysis</h3>
                 <label>Database Path</label>
                 <input id="analysis-db-path" />

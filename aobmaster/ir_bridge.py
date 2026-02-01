@@ -24,25 +24,25 @@ def build_wildcard_reasons(
 ) -> tuple[WildcardReason, ...]:
     """
     Infer wildcard reasons from instruction and mask.
-    
+
     This is a heuristic reconstruction since v1.x doesn't track reasons.
     v2 native code should record reasons during normalization.
     """
     reasons: list[WildcardReason] = []
-    
+
     # Find wildcard byte ranges
     wildcard_positions: list[int] = []
     for i, m in enumerate(mask):
         if m == 0x00:
             wildcard_positions.append(i)
-    
+
     if not wildcard_positions:
         return tuple(reasons)
-    
+
     # Group consecutive wildcards
     groups: list[list[int]] = []
     current_group: list[int] = [wildcard_positions[0]]
-    
+
     for pos in wildcard_positions[1:]:
         if pos == current_group[-1] + 1:
             current_group.append(pos)
@@ -50,10 +50,10 @@ def build_wildcard_reasons(
             groups.append(current_group)
             current_group = [pos]
     groups.append(current_group)
-    
+
     # Infer reason for each group based on instruction string
     insn_str = str(insn.insn).lower()
-    
+
     for group in groups:
         # Heuristic: identify operand type based on instruction pattern
         if any(x in insn_str for x in ["call", "jmp", "jz", "jnz", "je", "jne"]):
@@ -76,7 +76,7 @@ def build_wildcard_reasons(
             operand_type = "immediate"
             reason = f"Immediate value wildcarded (profile={profile})"
             rule = f"{profile}:immediates"
-        
+
         reasons.append(
             WildcardReason(
                 positions=tuple(group),
@@ -85,7 +85,7 @@ def build_wildcard_reasons(
                 profile_rule=rule,
             )
         )
-    
+
     return tuple(reasons)
 
 
@@ -101,7 +101,7 @@ def convert_candidate_to_ir(
 ) -> SignatureIR:
     """
     Convert v1.x candidate data to v2 SignatureIR format.
-    
+
     Args:
         insns: Decoded instructions in the window
         pattern_bytes: Pattern with wildcards as 0x00
@@ -111,7 +111,7 @@ def convert_candidate_to_ir(
         anchor_rva: Anchor RVA
         profile: Wildcard profile used
         section_name: Section containing anchor
-    
+
     Returns:
         SignatureIR with full metadata
     """
@@ -119,23 +119,23 @@ def convert_candidate_to_ir(
     instruction_irs: list[InstructionIR] = []
     byte_offset = 0
     anchor_insn_index = 0
-    
+
     for i, insn in enumerate(insns):
         insn_len = insn.size
         insn_mask = pattern_mask[byte_offset:byte_offset + insn_len]
         insn_pattern = pattern_bytes[byte_offset:byte_offset + insn_len]
-        
+
         # Track which instruction contains anchor
         if insn.fo <= anchor_fo < insn.fo + insn_len:
             anchor_insn_index = i
-        
+
         # Build wildcard reasons
         wildcards = build_wildcard_reasons(insn, insn_mask, profile)
-        
+
         instruction_irs.append(
             InstructionIR(
                 offset=insn.fo,
-                rva=insn.ip,
+                rva=anchor_rva + (insn.fo - anchor_fo),
                 asm=str(insn.insn),
                 bytes_raw=insn.raw,
                 bytes_pattern=insn_pattern,
@@ -143,9 +143,9 @@ def convert_candidate_to_ir(
                 wildcards=wildcards,
             )
         )
-        
+
         byte_offset += insn_len
-    
+
     # Build constraints
     constraints: list[SignatureConstraint] = [
         SignatureConstraint(
@@ -159,7 +159,7 @@ def convert_candidate_to_ir(
             validation_logic="decode instruction at anchor offset; verify anchor offset == instruction start",
         ),
     ]
-    
+
     # Add no-relocation constraint if in .text section
     if section_name == ".text":
         constraints.append(
@@ -169,7 +169,7 @@ def convert_candidate_to_ir(
                 validation_logic="check PE relocation table for entries in [anchor, anchor+pattern_len]",
             )
         )
-    
+
     return SignatureIR(
         pattern_bytes=pattern_bytes,
         pattern_mask=pattern_mask,
@@ -185,36 +185,47 @@ def convert_candidate_to_ir(
 def format_explain_output(trace_events: list[Any], signature_ir: SignatureIR | None = None) -> list[str]:
     """
     Format trace events and signature IR for --explain mode.
-    
+
     Args:
-        trace_events: List of TraceEvent objects
+        trace_events: List of TraceEvent objects or serialized event dicts
         signature_ir: Optional SignatureIR to explain
-    
+
     Returns:
         List of formatted lines for text output
     """
     lines: list[str] = []
-    
+
     lines.append("=" * 80)
     lines.append("AOBMASTER v2 EXPLAINABILITY OUTPUT")
     lines.append("=" * 80)
     lines.append("")
-    
-    # Group events by phase
-    phases = {}
+
+    # Group events by phase. Accept either TraceEvent objects or dicts produced by TraceCollector.to_dict().
+    phases: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     for event in trace_events:
-        phase = event.phase
+        if isinstance(event, dict):
+            # Serialized event dict (from TraceCollector.to_dict()['events'])
+            phase = event.get("phase", "unknown")
+            description = event.get("description", "")
+            details = event.get("details", {}) or {}
+        else:
+            # Event object
+            phase = getattr(event, "phase", "unknown")
+            description = getattr(event, "description", "")
+            details = getattr(event, "details", {}) or {}
+
         if phase not in phases:
             phases[phase] = []
-        phases[phase].append(event)
-    
+        phases[phase].append((description, details))
+
     # Output events by phase
     for phase, events in phases.items():
         lines.append(f"--- PHASE: {phase.upper()} ---")
-        for event in events:
-            lines.append(f"  • {event.description}")
-            if event.details:
-                for key, value in event.details.items():
+        for description, details in events:
+            lines.append(f"  • {description}")
+            if details:
+                # details may contain nested dicts or simple values
+                for key, value in details.items():
                     if isinstance(value, dict):
                         lines.append(f"    {key}:")
                         for k2, v2 in value.items():
@@ -222,7 +233,7 @@ def format_explain_output(trace_events: list[Any], signature_ir: SignatureIR | N
                     else:
                         lines.append(f"    {key}: {value}")
         lines.append("")
-    
+
     # Output signature IR details if provided
     if signature_ir:
         lines.append("--- SIGNATURE IR ---")
@@ -230,7 +241,7 @@ def format_explain_output(trace_events: list[Any], signature_ir: SignatureIR | N
         lines.append(f"Length: {signature_ir.byte_length} bytes")
         lines.append(f"Wildcards: {signature_ir.wildcard_count} ({signature_ir.wildcard_ratio:.1%})")
         lines.append("")
-        
+
         lines.append("Instructions:")
         for i, insn in enumerate(signature_ir.instructions):
             marker = "  ← ANCHOR" if i == signature_ir.anchor_instruction_index else ""
@@ -242,12 +253,12 @@ def format_explain_output(trace_events: list[Any], signature_ir: SignatureIR | N
                 for wc in insn.wildcards:
                     lines.append(f"       • Wildcarded positions {wc.positions}: {wc.reason}")
         lines.append("")
-        
+
         lines.append("Constraints:")
         for constraint in signature_ir.constraints:
             lines.append(f"  • [{constraint.constraint_type}] {constraint.description}")
         lines.append("")
-    
+
     lines.append("=" * 80)
-    
+
     return lines

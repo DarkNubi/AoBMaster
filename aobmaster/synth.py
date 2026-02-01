@@ -269,7 +269,7 @@ def run_synthesis_core(
             warnings.append(
                 AoBMasterWarning(
                     kind="anchor_shift_enabled",
-                    message=f"Anchor shifting enabled: trying {len(shifted_anchors)} anchor positions (±{anchor_shift} instructions)",
+                    message=f"Anchor shifting enabled: trying {len(shifted_anchors)} anchor positions (+/-{anchor_shift} instructions)",
                     details={"shift_range": anchor_shift, "anchor_count": len(shifted_anchors)},
                 )
             )
