@@ -1,0 +1,265 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>AoBMaster v2.3 GUI</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="brand">
+            <span class="brand-title">AoBMaster v2.3</span>
+            <span class="brand-subtitle">Signature Workbench</span>
+          </div>
+          <div class="mode-badges">
+            <span class="badge badge-locked" id="mode-badge">🔒 Read-Only Mode</span>
+            <span class="badge badge-experimental" id="experimental-badge">Experimental Off</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="mode-toggle">
+            <label>
+              <input type="checkbox" id="mutation-toggle" />
+              Enable Mutation Mode
+            </label>
+          </div>
+          <div class="mode-toggle">
+            <label>
+              <input type="checkbox" id="experimental-toggle" />
+              Enable Experimental Features
+            </label>
+          </div>
+        </div>
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <nav class="nav">
+            <button class="nav-item active">Overview</button>
+            <button class="nav-item">Synthesis</button>
+            <button class="nav-item">Signatures</button>
+            <button class="nav-item">Tests</button>
+            <button class="nav-item">Temporal</button>
+          </nav>
+          <div class="panel">
+            <h3>Audit Log</h3>
+            <div class="audit-log">
+              <ul id="audit-log"></ul>
+            </div>
+            <button class="secondary">Copy Log</button>
+          </div>
+        </aside>
+        <main class="main">
+          <div class="status-row">
+            <div id="status" class="status">Ready.</div>
+            <div class="banner" id="mutation-banner">Read-only mode (mutations disabled)</div>
+            <div class="banner warning" id="experimental-banner">Experimental features disabled</div>
+          </div>
+          <section class="section">
+            <div class="section-header">
+              <h2>Synthesis Workspace</h2>
+              <p>Configure synthesis parameters explicitly and generate stable signatures.</p>
+            </div>
+            <div class="grid">
+              <div class="card">
+                <h3>Base Binary &amp; Anchor</h3>
+                <p class="card-subtitle">Select a base binary and anchor mode.</p>
+                <label>Base Binary</label>
+                <div class="input-row">
+                  <input id="base-binary" placeholder="/path/to/binary.exe" />
+                  <button id="pick-base-binary" class="secondary">Pick</button>
+                </div>
+                <label>Anchor Type</label>
+                <div class="option-row">
+                  <label class="option"><input type="radio" name="anchor-type" value="rva" checked /> RVA</label>
+                  <label class="option"><input type="radio" name="anchor-type" value="fo" /> File Offset</label>
+                  <label class="option"><input type="radio" name="anchor-type" value="va" /> Virtual Address</label>
+                </div>
+                <label>Anchor Value <span class="hint">Hex (0x...)</span></label>
+                <input id="anchor-value" placeholder="0x1000" />
+                <label>Version Binaries <span class="hint">Comma separated</span></label>
+                <input id="version-binaries" />
+                <label>Align Mode</label>
+                <select id="align-mode">
+                  <option value="bytespan">bytespan</option>
+                  <option value="anchor-rva">anchor-rva</option>
+                </select>
+              </div>
+              <div class="card">
+                <h3>Alignment Seed</h3>
+                <p class="card-subtitle">Seed configuration for multi-version alignment.</p>
+                <label>Seed Bytes</label>
+                <input id="seed-bytes" value="32" type="number" />
+                <label>Seed Scan</label>
+                <select id="seed-scan">
+                  <option value="section">section</option>
+                  <option value="module">module</option>
+                </select>
+                <label class="option"><input type="checkbox" id="seed-allow-multi" /> Allow multi seed matches</label>
+                <label>Scan Range</label>
+                <select id="scan-range">
+                  <option value="">auto</option>
+                  <option value="section">section</option>
+                  <option value="module">module</option>
+                </select>
+              </div>
+              <div class="card">
+                <h3>Context Window</h3>
+                <p class="card-subtitle">Control instruction context around the anchor.</p>
+                <label>Context Before</label>
+                <input id="context-before" value="8" type="number" />
+                <label>Context After</label>
+                <input id="context-after" value="8" type="number" />
+                <label>Max Context Instructions</label>
+                <input id="max-context-insns" value="32" type="number" />
+                <label class="option"><input type="checkbox" id="context-variations" /> Context variations</label>
+              </div>
+              <div class="card">
+                <h3>Wildcarding Profile</h3>
+                <p class="card-subtitle">Select how aggressively bytes are wildcarded.</p>
+                <label>Profile</label>
+                <select id="profile">
+                  <option value="default">default</option>
+                  <option value="minimal">minimal</option>
+                  <option value="strict">strict</option>
+                  <option value="balanced">balanced</option>
+                  <option value="aggressive">aggressive</option>
+                  <option value="stack-only">stack-only</option>
+                  <option value="global-only">global-only</option>
+                  <option value="memory-heavy">memory-heavy</option>
+                </select>
+                <label>Min Instructions</label>
+                <input id="min-insns" value="6" type="number" />
+                <label>Max Instructions</label>
+                <input id="max-insns" value="14" type="number" />
+                <label>Top N</label>
+                <input id="top-n" value="5" type="number" />
+              </div>
+              <div class="card">
+                <h3>Validation Rules</h3>
+                <p class="card-subtitle">Explicit validation constraints for candidates.</p>
+                <label class="option"><input type="checkbox" id="require-unique" checked /> Require unique</label>
+                <label class="option"><input type="checkbox" id="require-present-all" checked /> Require present all</label>
+                <label class="option"><input type="checkbox" id="explain" /> Explainability</label>
+              </div>
+              <div class="card warning-card">
+                <h3>Experimental Anchoring</h3>
+                <p class="card-subtitle">Structural anchoring requires explicit confirmation.</p>
+                <label>Anchor Mode</label>
+                <select id="anchor-mode">
+                  <option value="byte-offset">byte-offset</option>
+                  <option value="structural">structural (experimental)</option>
+                </select>
+                <label>Structural Min Confidence</label>
+                <input id="structural-min-confidence" value="0.6" type="number" step="0.01" />
+                <label>Anchor Shift</label>
+                <input id="anchor-shift" value="0" type="number" />
+              </div>
+            </div>
+            <div class="action-bar">
+              <div class="action-group">
+                <button id="preview-cli" class="secondary">Preview CLI</button>
+                <button id="export-config" class="secondary">Export Config</button>
+                <button id="compare-cli" class="secondary">Save CLI Parity Snapshot</button>
+              </div>
+              <div class="action-group">
+                <button id="run-synthesis">Generate Signature</button>
+                <button id="cancel-synthesis" class="secondary">Cancel</button>
+              </div>
+            </div>
+            <div class="results-grid">
+              <div class="card">
+                <h3>CLI Preview</h3>
+                <div class="mono" id="cli-preview"></div>
+              </div>
+              <div class="card">
+                <h3>Candidate Results</h3>
+                <div id="synthesis-result">No results yet.</div>
+              </div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-header">
+              <h2>Signature Database</h2>
+              <p>Browse, query, and export signatures without hidden defaults.</p>
+            </div>
+            <div class="grid">
+              <div class="card">
+                <h3>Database Controls</h3>
+                <label>Database Path</label>
+                <input id="db-path" placeholder="signatures.db" />
+                <button id="db-init" class="secondary requires-mutation" title="Enable mutation mode to proceed">Init Database</button>
+                <label>Filter</label>
+                <input id="db-filter" />
+                <button id="db-list">List Signatures</button>
+                <ul id="signature-list"></ul>
+              </div>
+              <div class="card">
+                <h3>Signature Detail</h3>
+                <label>Signature ID</label>
+                <input id="db-signature-id" />
+                <button id="db-query">Query Signature</button>
+                <div id="signature-detail">Select a signature to view details.</div>
+                <div class="action-group">
+                  <button id="db-export" class="secondary">Export Signatures</button>
+                  <button id="db-import" class="secondary requires-mutation" title="Enable mutation mode to proceed">Import Signatures</button>
+                </div>
+              </div>
+              <div class="card">
+                <h3>Save Signature</h3>
+                <label>Signature ID</label>
+                <input id="save-signature-id" />
+                <label>Name</label>
+                <input id="save-signature-name" />
+                <label>Author</label>
+                <input id="save-signature-author" />
+                <label>Version Range</label>
+                <input id="save-signature-version" />
+                <label>Parent ID</label>
+                <input id="save-signature-parent" />
+                <button id="save-signature" class="requires-mutation" title="Enable mutation mode to proceed">Save Signature</button>
+              </div>
+              <div class="card danger-card">
+                <h3>Deprecate Signature</h3>
+                <label>Signature ID</label>
+                <input id="deprecate-id" />
+                <label>Reason</label>
+                <input id="deprecate-reason" />
+                <button id="deprecate-signature" class="danger requires-mutation" title="Enable mutation mode to proceed">Deprecate Signature</button>
+              </div>
+            </div>
+          </section>
+          <section class="section">
+            <div class="section-header">
+              <h2>Testing &amp; Temporal Analysis</h2>
+              <p>Execute test suites and review stability analytics.</p>
+            </div>
+            <div class="grid">
+              <div class="card">
+                <h3>Test Runner</h3>
+                <label>Database Path</label>
+                <input id="test-db-path" />
+                <label>Signature ID (optional)</label>
+                <input id="test-signature-id" />
+                <label>Corpus Pattern</label>
+                <input id="test-corpus" placeholder="binaries/*.exe" />
+                <label>Parallel</label>
+                <input id="test-parallel" value="1" type="number" />
+                <label class="option"><input type="checkbox" id="test-record" /> Record results</label>
+                <button id="run-tests" class="requires-mutation" title="Enable mutation mode to proceed">Run Tests</button>
+                <pre id="test-results"></pre>
+              </div>
+              <div class="card">
+                <h3>Temporal Analysis</h3>
+                <label>Database Path</label>
+                <input id="analysis-db-path" />
+                <button id="run-analysis">Analyze</button>
+                <pre id="analysis-results"></pre>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
