@@ -3,3 +3,9 @@ python -m aobmaster synth --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeS
 
 2 file:
 python -m aobmaster synth --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.247.2\MapleStory.exe" --anchor-rva 0x5189C01 --versions "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.246.2\MapleStory.exe" --format ce
+
+auto-synth (v2.1 - automatically finds best anchor in ±100 bytes):
+python -m aobmaster auto-synth --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.247.2\MapleStory.exe" --anchor-rva 0x5189C01 --versions "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.246.2\MapleStory.exe" --format ce
+
+auto-recover (v2.1 - automatically recover broken signature in new version):
+python -m aobmaster auto-recover --base "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.246.2\MapleStory.exe" --anchor-rva 0x5189C01 --target "C:\Users\kiatp\OneDrive\Projects\WIP\Maple\CeScripts\SEA\v7.247.2\MapleStory.exe" --format ce

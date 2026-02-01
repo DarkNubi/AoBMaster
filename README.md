@@ -1,6 +1,11 @@
-# AoBMaster v2.0
+# AoBMaster v2.1
 
 AoBMaster is a **standalone, deterministic CLI tool and signature management platform** that synthesizes **stable Array-of-Bytes (AoB) signatures** from a known **anchor address** in a **PE x64** binary, and optionally validates those signatures across multiple versions of the same program.
+
+**What's New in v2.1:**
+- 🤖 **Auto-Synth**: Automatically finds best anchors in ±100 byte range (10x-300x faster than manual)
+- 🔧 **Auto-Recover**: Automatically recovers broken signatures in new versions (100x faster)
+- 🎯 **Smart Strategy**: Multiple recovery strategies (anchor shift, function boundary)
 
 **What's New in v2.0:**
 - 🔍 **Explainability**: Understand WHY patterns work with `--explain` mode
@@ -10,9 +15,14 @@ AoBMaster is a **standalone, deterministic CLI tool and signature management pla
 - 🏗️ **Signature Families**: Track signature evolution and lineage over time
 - 🎯 **Structural Anchors**: Function-relative anchoring (experimental)
 
-v2.0 is **fully backward compatible** with v1.x - all v1.x commands work identically.
+v2.1 is **fully backward compatible** with v2.0 and v1.x - all previous commands work identically.
 
 ## Commands
+
+### v2.1 Commands (Auto Mode - Recommended for Most Users)
+
+- `aobmaster auto-synth` — automatically find and test multiple anchors for stable signatures
+- `aobmaster auto-recover` — automatically recover broken signatures in new versions
 
 ### v1.x Commands (Core Functionality)
 
@@ -34,6 +44,30 @@ v2.0 is **fully backward compatible** with v1.x - all v1.x commands work identic
 - `aobmaster diagnose` — show signature family lineage
 
 ## Quick Start Examples
+
+### Auto Mode (v2.1 - Recommended)
+
+#### Automatic Multi-Anchor Search
+
+Find the best stable signature by testing multiple anchor points automatically:
+
+```bash
+aobmaster auto-synth --base game.exe --anchor-rva 0x123456 --versions game_v2.exe
+```
+
+This replaces the manual process of testing 100+ anchor positions. Returns top-ranked signatures from the most stable anchors in ±100 bytes.
+
+#### Automatic Signature Recovery
+
+Recover a broken signature in a new version automatically:
+
+```bash
+aobmaster auto-recover --base old_game.exe --anchor-rva 0x123456 --target new_game.exe
+```
+
+This replaces manual xref searching, function boundary checking, and instruction diffing. Returns top recovery candidates with confidence scores.
+
+**See [AUTO_MODE_GUIDE.md](docs/AUTO_MODE_GUIDE.md) for comprehensive auto mode documentation.**
 
 ### Basic Synthesis
 
