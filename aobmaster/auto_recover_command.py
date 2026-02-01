@@ -112,7 +112,7 @@ def run_auto_recover(args: Any) -> int:
             print("\nNo successful recovery strategies found.", file=sys.stderr)
             print("The signature could not be automatically recovered.", file=sys.stderr)
         
-        return int(ExitCode.NO_CANDIDATES)
+        return int(ExitCode.ALIGNMENT_FAILURE)
     
     if args.format != "json":
         print(f"[auto-recover] Found {len(successful_recoveries)} potential recovery points", file=sys.stderr)
@@ -181,7 +181,7 @@ def run_auto_recover(args: Any) -> int:
     
     if not recovered_signatures:
         raise AoBMasterError(
-            ExitCode.NO_CANDIDATES,
+            ExitCode.ALIGNMENT_FAILURE,
             "no_signatures_generated",
             "Recovery strategies succeeded but no signatures could be generated",
             {"recoveries_tried": len(successful_recoveries)},

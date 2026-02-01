@@ -121,7 +121,7 @@ def run_auto_synth(args: Any) -> int:
     
     if not all_results:
         raise AoBMasterError(
-            ExitCode.NO_CANDIDATES,
+            ExitCode.ALIGNMENT_FAILURE,
             "no_valid_signatures",
             "No valid signatures found across any anchor candidates",
             {"anchors_tried": len(anchor_candidates)},

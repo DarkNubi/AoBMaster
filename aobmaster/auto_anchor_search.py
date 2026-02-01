@@ -27,7 +27,7 @@ def enumerate_instructions_in_range(
     *,
     byte_range: int,
     max_context_insns: int = 200,
-) -> list[DecodedInsn]:
+) -> list[tuple[DecodedInsn, int]]:
     """
     Enumerate all instructions within ±byte_range of center_fo.
     
@@ -39,7 +39,7 @@ def enumerate_instructions_in_range(
         max_context_insns: Maximum instructions to decode
     
     Returns:
-        List of decoded instructions in the range
+        List of (decoded_instruction, rva) tuples in the range
     """
     # Calculate byte bounds
     start_fo = max(section.raw_ptr, center_fo - byte_range)
@@ -62,17 +62,18 @@ def enumerate_instructions_in_range(
         # If context decode fails, return empty
         return []
     
-    # Filter to instructions within byte range
-    result: list[DecodedInsn] = []
+    # Filter to instructions within byte range and compute RVAs
+    result: list[tuple[DecodedInsn, int]] = []
     for insn in ctx.insns:
         if start_fo <= insn.fo <= end_fo:
-            result.append(insn)
+            rva = pe.fo_to_rva(insn.fo)
+            result.append((insn, rva))
     
     return result
 
 
 def score_anchor_candidates(
-    instructions: list[DecodedInsn],
+    instructions: list[tuple[DecodedInsn, int]],
     *,
     top_n: int = 10,
 ) -> list[AnchorCandidate]:
@@ -80,15 +81,15 @@ def score_anchor_candidates(
     Score and rank instructions as potential anchors.
     
     Args:
-        instructions: List of decoded instructions
+        instructions: List of (decoded_instruction, rva) tuples
         top_n: Number of top candidates to return
     
     Returns:
         List of top-N anchor candidates sorted by score (best first)
     """
-    scored: list[tuple[float, DecodedInsn, str]] = []
+    scored: list[tuple[float, DecodedInsn, int, str]] = []
     
-    for insn in instructions:
+    for insn, rva in instructions:
         score = score_instruction_stability(insn)
         
         # Generate reason based on score
@@ -99,19 +100,21 @@ def score_anchor_candidates(
         else:
             reason = "Low stability anchor"
         
-        scored.append((score, insn, reason))
+        scored.append((score, insn, rva, reason))
     
     # Sort by score descending
     scored.sort(key=lambda x: x[0], reverse=True)
     
     # Take top N and convert to AnchorCandidate
     result: list[AnchorCandidate] = []
-    for score, insn, reason in scored[:top_n]:
+    for score, insn, rva, reason in scored[:top_n]:
+        # Compute VA from IP
+        va = insn.ip
         result.append(
             AnchorCandidate(
                 fo=insn.fo,
-                rva=insn.rva,
-                va=insn.va,
+                rva=rva,
+                va=va,
                 score=score,
                 reason=reason,
                 insn=insn,
