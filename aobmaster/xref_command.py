@@ -103,7 +103,7 @@ def run_xref(args: Any) -> int:
             )
 
     refs.sort(key=lambda r: int(r["from_rva"], 16))
-    refs = refs[: max(1, args.limit)]
+    refs = refs[: args.limit]
 
     out_obj = {
         "ok": True,

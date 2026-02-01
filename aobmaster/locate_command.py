@@ -72,7 +72,7 @@ def run_locate(args: Any) -> int:
     )
 
     base_candidates = [c for c in synth_obj.get("candidates", []) if c.get("valid")]
-    base_candidates = base_candidates[: max(1, args.candidate_limit)]
+    base_candidates = base_candidates[: args.candidate_limit]
 
     targets: list[dict[str, Any]] = []
     for target_path in args.target:
@@ -125,7 +125,7 @@ def run_locate(args: Any) -> int:
             results.append(record)
 
         results.sort(key=lambda r: (-float(r.get("score", 0.0)), r.get("target_rva", "")))
-        results = results[: max(1, args.top_n)]
+        results = results[: args.top_n]
         targets.append({"path": str(target_path), "results": results})
 
     out_obj = {
