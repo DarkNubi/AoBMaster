@@ -1,5 +1,5 @@
 import './index.css';
-const { PROTOCOL_VERSION, SDK_VERSION, buildRequest } = require('./ipc');
+const { PROTOCOL_VERSION, SDK_VERSION, GUI_VERSION, buildRequest } = require('./ipc');
 
 const state = {
   mutationMode: false,
@@ -174,7 +174,7 @@ const mutationGuard = (reason) => {
 const serializeSynthesisConfig = (params) => ({
   config: params,
   timestamp: new Date().toISOString(),
-  gui_version: '2.3.0',
+  gui_version: GUI_VERSION,
   sdk_version: SDK_VERSION,
 });
 
@@ -549,8 +549,14 @@ const runSaveSignature = async () => {
     setStatus('No valid candidate pattern to save.', true);
     return;
   }
-  const anchorValue = getValue('anchor-value');
-  const anchorError = validateAnchorHex(anchorValue, 'Anchor RVA');
+  const synthesisParams = gatherSynthesisParams();
+  const anchorValue = synthesisParams.anchor_rva || synthesisParams.anchor_fo || synthesisParams.anchor_va || '';
+  const anchorLabel = synthesisParams.anchor_rva
+    ? 'Anchor RVA'
+    : synthesisParams.anchor_fo
+      ? 'Anchor file offset'
+      : 'Anchor virtual address';
+  const anchorError = validateAnchorHex(anchorValue, anchorLabel);
   if (anchorError) {
     setStatus(anchorError, true);
     return;

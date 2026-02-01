@@ -18,7 +18,7 @@ DEFAULT_TRACE_LIMIT_BYTES = 10 * 1024 * 1024
 
 
 @dataclass(frozen=True)
-class JsonRpcError:
+class JsonRpcError(Exception):
     code: int
     message: str
     data: Optional[Dict[str, Any]] = None
@@ -205,7 +205,7 @@ def _handle_request(request: Dict[str, Any]) -> Dict[str, Any]:
             data={"expected": PROTOCOL_VERSION, "received": protocol_version},
         )
     sdk_version = request.get("sdk_version")
-    if sdk_version != SDK_VERSION:
+    if sdk_version and sdk_version.split(".")[0] != SDK_VERSION.split(".")[0]:
         raise JsonRpcError(
             code=-32011,
             message="Incompatible SDK version.",

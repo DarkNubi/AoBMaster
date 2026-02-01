@@ -1,5 +1,6 @@
 const PROTOCOL_VERSION = '1.0';
 const SDK_VERSION = '2.0.0';
+const GUI_VERSION = '2.3.0';
 
 const buildRequest = (method, params) => ({
   jsonrpc: '2.0',
@@ -13,5 +14,6 @@ const buildRequest = (method, params) => ({
 module.exports = {
   PROTOCOL_VERSION,
   SDK_VERSION,
+  GUI_VERSION,
   buildRequest,
 };

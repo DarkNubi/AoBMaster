@@ -1,4 +1,4 @@
-from aobmaster.gui_worker import _handle_request, PROTOCOL_VERSION, _truncate_trace
+from aobmaster.gui_worker import _handle_request, PROTOCOL_VERSION, _truncate_trace, JsonRpcError
 from tests.conftest import build_minimal_pe64
 
 
@@ -14,6 +14,23 @@ def test_gui_worker_versions():
     result = _handle_request(request)
     assert result["protocol_version"] == PROTOCOL_VERSION
     assert "sdk_version" in result
+
+
+def test_gui_worker_version_mismatch():
+    request = {
+        "jsonrpc": "2.0",
+        "protocol_version": PROTOCOL_VERSION,
+        "sdk_version": "1.0.0",
+        "id": "1",
+        "method": "system.versions",
+        "params": {},
+    }
+    try:
+        _handle_request(request)
+    except JsonRpcError as exc:
+        assert "Incompatible SDK version" in exc.message
+    else:
+        raise AssertionError("Expected incompatible SDK version error")
 
 
 def test_gui_worker_trace_truncation(monkeypatch):
