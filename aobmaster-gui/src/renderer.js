@@ -545,7 +545,10 @@ const runSaveSignature = async () => {
   if (!window.confirm('Save signature to database?')) {
     return;
   }
-  const top = state.currentResult.result.candidates.find((cand) => cand.valid);
+  const candidates = Array.isArray(state.currentResult?.result?.candidates)
+    ? state.currentResult.result.candidates
+    : [];
+  const top = candidates.find((cand) => cand.valid);
   const pattern = top?.aob || '';
   if (!pattern) {
     setStatus('No valid candidate pattern to save.', true);
@@ -554,13 +557,17 @@ const runSaveSignature = async () => {
   const synthesisParams = gatherSynthesisParams();
   const resolvedRva = state.currentResult.result?.anchor?.resolved_base?.rva;
   const anchorValue = resolvedRva || synthesisParams.anchor_rva || synthesisParams.anchor_fo || synthesisParams.anchor_va || '';
+  if (!anchorValue) {
+    setStatus('Anchor value missing from synthesis parameters.', true);
+    return;
+  }
   const anchorLabel = resolvedRva
     ? 'Resolved anchor RVA'
     : synthesisParams.anchor_rva
-    ? 'Anchor RVA'
-    : synthesisParams.anchor_fo
-      ? 'Anchor file offset'
-      : 'Anchor virtual address';
+      ? 'Anchor RVA'
+      : synthesisParams.anchor_fo
+        ? 'Anchor file offset'
+        : 'Anchor virtual address';
   const anchorError = validateAnchorHex(anchorValue, anchorLabel);
   if (anchorError) {
     setStatus(anchorError, true);

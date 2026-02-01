@@ -49,14 +49,23 @@ def _truncate_trace(trace: Dict[str, Any]) -> Dict[str, Any]:
     limit = _trace_limit_bytes()
     if len(serialized.encode("utf-8")) <= limit:
         return trace
-    truncated = serialized.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
-    return {
-        "truncated": True,
-        "limit_bytes": limit,
-        "payload": truncated,
-        "warning": "Trace payload exceeded size limit and was truncated.",
-        "original_size_bytes": len(serialized.encode("utf-8")),
-    }
+    original_size = len(serialized.encode("utf-8"))
+    trimmed = dict(trace)
+    if isinstance(trimmed.get("events"), list):
+        trimmed_events = list(trimmed["events"])
+        while trimmed_events:
+            trimmed["events"] = trimmed_events
+            if len(json.dumps(trimmed).encode("utf-8")) <= limit:
+                break
+            trimmed_events.pop()
+        trimmed["events"] = trimmed_events
+    if len(json.dumps(trimmed).encode("utf-8")) > limit:
+        trimmed = {"events": []}
+    trimmed["truncated"] = True
+    trimmed["limit_bytes"] = limit
+    trimmed["original_size_bytes"] = original_size
+    trimmed["warning"] = "Trace payload exceeded size limit and was truncated."
+    return trimmed
 
 
 def _normalize_paths(params: Dict[str, Any], keys: list[str]) -> Dict[str, Any]:
