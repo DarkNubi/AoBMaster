@@ -138,7 +138,7 @@ const ensureVersionHandshake = async () => {
   if (result.protocol_version !== PROTOCOL_VERSION) {
     throw new Error('SDK protocol version mismatch');
   }
-  if (result.sdk_version !== SDK_VERSION) {
+  if (result.sdk_version.split('.')[0] !== SDK_VERSION.split('.')[0]) {
     throw new Error('SDK version mismatch');
   }
 };

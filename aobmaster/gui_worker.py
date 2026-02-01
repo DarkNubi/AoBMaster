@@ -17,11 +17,12 @@ PROTOCOL_VERSION = "1.0"
 DEFAULT_TRACE_LIMIT_BYTES = 10 * 1024 * 1024
 
 
-@dataclass(frozen=True)
 class JsonRpcError(Exception):
-    code: int
-    message: str
-    data: Optional[Dict[str, Any]] = None
+    def __init__(self, code: int, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.data = data
 
     def to_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {"code": self.code, "message": self.message}

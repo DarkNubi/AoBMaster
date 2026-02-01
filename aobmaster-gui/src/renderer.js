@@ -17,12 +17,14 @@ const appendAudit = (entry) => {
 
 const formatError = (response) => {
   if (!response) {
-    return 'Unknown IPC error';
+    return 'Unknown IPC error (no response payload).';
   }
   if (response.error) {
-    return response.error.message || 'SDK error';
+    const code = response.error.code ?? 'unknown';
+    const message = response.error.message || 'SDK error';
+    return `SDK error [${code}]: ${message}`;
   }
-  return 'Unexpected response format';
+  return `Unexpected response format: ${JSON.stringify(response)}`;
 };
 
 
@@ -60,7 +62,7 @@ const callSdk = async (method, params) => {
   logRequest(method, params);
   const response = await window.aobmaster.ipcRequest(buildRequest(method, params));
   if (response.error) {
-    throw new Error(formatError(response));
+    throw new Error(`[${method}] ${formatError(response)}`);
   }
   return response.result;
 };
@@ -550,8 +552,11 @@ const runSaveSignature = async () => {
     return;
   }
   const synthesisParams = gatherSynthesisParams();
-  const anchorValue = synthesisParams.anchor_rva || synthesisParams.anchor_fo || synthesisParams.anchor_va || '';
-  const anchorLabel = synthesisParams.anchor_rva
+  const resolvedRva = state.currentResult.result?.anchor?.resolved_base?.rva;
+  const anchorValue = resolvedRva || synthesisParams.anchor_rva || synthesisParams.anchor_fo || synthesisParams.anchor_va || '';
+  const anchorLabel = resolvedRva
+    ? 'Resolved anchor RVA'
+    : synthesisParams.anchor_rva
     ? 'Anchor RVA'
     : synthesisParams.anchor_fo
       ? 'Anchor file offset'
@@ -568,7 +573,7 @@ const runSaveSignature = async () => {
       signature_id: sigId,
       name,
       pattern,
-      anchor_rva: getValue('anchor-value'),
+      anchor_rva: anchorValue,
       binary_hash: '',
       author: getValue('save-signature-author'),
       version_range: getValue('save-signature-version'),
