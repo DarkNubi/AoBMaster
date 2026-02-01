@@ -85,6 +85,7 @@ const setStatus = (message, isError = false) => {
 const toggleMutationMode = (enabled) => {
   state.mutationMode = enabled;
   renderMutationBanner();
+  updateMutationControls();
 };
 
 const toggleExperimental = (enabled) => {
@@ -94,24 +95,39 @@ const toggleExperimental = (enabled) => {
 
 const renderMutationBanner = () => {
   const banner = document.getElementById('mutation-banner');
+  const badge = document.getElementById('mode-badge');
   if (state.mutationMode) {
-    banner.textContent = 'Mutation Mode Enabled';
+    banner.textContent = '⚠️ Mutation Mode Enabled';
     banner.classList.add('active');
+    badge.textContent = '⚠️ Mutation Mode';
+    badge.classList.remove('badge-locked');
   } else {
     banner.textContent = 'Read-only mode (mutations disabled)';
     banner.classList.remove('active');
+    badge.textContent = '🔒 Read-Only Mode';
+    badge.classList.add('badge-locked');
   }
 };
 
 const renderExperimentalBanner = () => {
   const banner = document.getElementById('experimental-banner');
+  const badge = document.getElementById('experimental-badge');
   if (state.experimentalEnabled) {
     banner.textContent = 'Experimental features enabled';
-    banner.classList.add('active');
+    banner.classList.add('active', 'warning');
+    badge.textContent = '⚠️ Experimental On';
   } else {
     banner.textContent = 'Experimental features disabled';
-    banner.classList.remove('active');
+    banner.classList.remove('active', 'warning');
+    badge.textContent = 'Experimental Off';
   }
+};
+
+const updateMutationControls = () => {
+  const controls = document.querySelectorAll('.requires-mutation');
+  controls.forEach((control) => {
+    control.disabled = !state.mutationMode;
+  });
 };
 
 const renderAuditLog = () => {
@@ -259,7 +275,7 @@ const renderSynthesisResult = () => {
   if (trace) {
     html += `<pre class="trace">${JSON.stringify(trace, null, 2)}</pre>`;
     if (trace.truncated) {
-      html += '<button id="export-trace">Export Trace</button>';
+      html += '<button class="secondary" id="export-trace">Export Trace</button>';
     }
   }
   container.innerHTML = html;
@@ -692,6 +708,7 @@ const bindEvents = () => {
 const init = () => {
   renderMutationBanner();
   renderExperimentalBanner();
+  updateMutationControls();
   renderAuditLog();
   renderSynthesisResult();
   renderSignatureDetail();
