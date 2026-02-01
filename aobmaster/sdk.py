@@ -28,6 +28,7 @@ class SynthesisConfig:
     
     # Version alignment
     version_binaries: Optional[List[Union[str, Path]]] = None
+    version_anchors: Optional[List[tuple[Union[str, Path], str]]] = None
     align_mode: str = "bytespan"
     seed_bytes: int = 32
     seed_scan: str = "section"
@@ -132,6 +133,7 @@ class Synthesizer:
         anchor_fo: Optional[str] = None,
         anchor_va: Optional[str] = None,
         version_binaries: Optional[List[Union[str, Path]]] = None,
+        version_anchors: Optional[List[tuple[Union[str, Path], str]]] = None,
         profile: str = "default",
         explain: bool = False,
         **kwargs
@@ -162,6 +164,7 @@ class Synthesizer:
             anchor_fo=anchor_fo,
             anchor_va=anchor_va,
             version_binaries=version_binaries or [],
+            version_anchors=version_anchors,
             profile=profile,
             explain=explain,
             **kwargs
@@ -524,6 +527,10 @@ def _run_synthesis(config: SynthesisConfig) -> SynthesisResult:
         anchor_fo=int(config.anchor_fo, 16) if config.anchor_fo else None,
         anchor_va=int(config.anchor_va, 16) if config.anchor_va else None,
         version_binaries=[Path(p) for p in config.version_binaries] if config.version_binaries else None,
+        version_anchors=[
+            (Path(p), int(rva, 16))
+            for p, rva in (config.version_anchors or [])
+        ] if config.version_anchors else None,
         align_mode=config.align_mode,
         seed_bytes=config.seed_bytes,
         seed_scan=config.seed_scan,

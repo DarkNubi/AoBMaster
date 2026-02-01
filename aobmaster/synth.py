@@ -76,6 +76,100 @@ def _bool_arg(s: str) -> bool:
     raise ValueError("expected true|false")
 
 
+def _parse_versions_map(path: Path) -> list[tuple[Path, int]]:
+    if not path.exists():
+        raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "versions-map file not found", {"path": str(path)})
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "invalid_args",
+            "versions-map file is not valid JSON",
+            {"path": str(path), "error": str(e)},
+        ) from e
+    versions = payload.get("versions")
+    if not isinstance(versions, list):
+        raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "versions-map missing 'versions' list", {"path": str(path)})
+    out: list[tuple[Path, int]] = []
+    for entry in versions:
+        if not isinstance(entry, dict):
+            raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "versions-map entry must be object", {"entry": entry})
+        raw_path = entry.get("path")
+        raw_rva = entry.get("anchor_rva")
+        if not raw_path or not raw_rva:
+            raise AoBMasterError(
+                ExitCode.INVALID_ARGS,
+                "invalid_args",
+                "versions-map entry requires path and anchor_rva",
+                {"entry": entry},
+            )
+        try:
+            rva = parse_hex_int(str(raw_rva))
+        except ValueError as e:
+            raise AoBMasterError(
+                ExitCode.INVALID_ARGS,
+                "invalid_args",
+                "versions-map anchor_rva must be hex",
+                {"entry": entry},
+            ) from e
+        out.append((Path(raw_path), rva))
+    return out
+
+
+def _parse_version_anchor_arg(raw: str) -> tuple[Path, int]:
+    if "@" not in raw:
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "invalid_args",
+            'version-anchor must be in the form "PATH@0xRVA"',
+            {"value": raw},
+        )
+    path_str, rva_str = raw.split("@", 1)
+    if not path_str or not rva_str:
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "invalid_args",
+            'version-anchor must be in the form "PATH@0xRVA"',
+            {"value": raw},
+        )
+    try:
+        rva = parse_hex_int(rva_str)
+    except ValueError as e:
+        raise AoBMasterError(
+            ExitCode.INVALID_ARGS,
+            "invalid_args",
+            "version-anchor RVA must be hex",
+            {"value": raw},
+        ) from e
+    return Path(path_str), rva
+
+
+def _resolve_explicit_version_anchors(args: Any) -> list[tuple[Path, int]]:
+    explicit: list[tuple[Path, int]] = []
+    if getattr(args, "versions_map", None):
+        explicit.extend(_parse_versions_map(Path(args.versions_map)))
+    for raw in getattr(args, "version_anchor", []) or []:
+        explicit.append(_parse_version_anchor_arg(raw))
+    if not explicit:
+        return []
+    seen: set[Path] = set()
+    deduped: list[tuple[Path, int]] = []
+    for path, rva in explicit:
+        if not path.exists():
+            raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", "Version binary not found", {"path": str(path)})
+        if path in seen:
+            raise AoBMasterError(
+                ExitCode.INVALID_ARGS,
+                "invalid_args",
+                "Duplicate version anchor path",
+                {"path": str(path)},
+            )
+        seen.add(path)
+        deduped.append((path, rva))
+    return deduped
+
+
 def run_synthesis_core(
     base_binary: Path,
     anchor_rva: int | None = None,
@@ -149,6 +243,8 @@ def run_synthesis_core(
     
     base_pe = PEFile(base_binary)
     version_paths = [Path(p) for p in (version_binaries or []) if Path(p) != base_binary]
+    if version_anchors:
+        version_paths = [p for p, _ in version_anchors]
     
     # Resolve anchor
     if anchor_rva is not None:
@@ -224,18 +320,55 @@ def run_synthesis_core(
     base_anchor_rva = base_pe.fo_to_rva(base_anchor_fo)
     base_anchor_va = base_pe.rva_to_va(base_anchor_rva)
 
-    # Align versions
-    aligned = align_versions(
-        base_pe=base_pe,
-        base_anchor_fo=base_anchor_fo,
-        base_anchor_rva=base_anchor_rva,
-        base_anchor_section=base_section,
-        version_paths=version_paths,
-        mode=align_mode,
-        seed_bytes=seed_bytes,
-        seed_scan=seed_scan,
-        seed_allow_multi=seed_allow_multi,
-    )
+    # Align versions (or use explicit anchors)
+    if version_anchors:
+        aligned = [
+            AlignedAnchor(
+                path=base_pe.path,
+                anchor_fo=base_anchor_fo,
+                anchor_rva=base_anchor_rva,
+                anchor_va=base_anchor_va,
+                section_name=base_section.name,
+                drift_rva=0,
+                seed_hits=None,
+            )
+        ]
+        explicit_paths: list[Path] = []
+        for ver_path, ver_rva in version_anchors:
+            pe = PEFile(ver_path)
+            sec = pe.section_containing_rva(ver_rva)
+            if not sec:
+                raise AoBMasterError(
+                    ExitCode.ALIGNMENT_FAILURE,
+                    "alignment_failed",
+                    "Anchor not within any section",
+                    {"path": str(ver_path), "anchor_rva": hex(ver_rva)},
+                )
+            aligned.append(
+                AlignedAnchor(
+                    path=ver_path,
+                    anchor_fo=pe.rva_to_fo(ver_rva),
+                    anchor_rva=ver_rva,
+                    anchor_va=pe.rva_to_va(ver_rva),
+                    section_name=sec.name,
+                    drift_rva=ver_rva - base_anchor_rva,
+                    seed_hits=None,
+                )
+            )
+            explicit_paths.append(ver_path)
+        version_paths = explicit_paths
+    else:
+        aligned = align_versions(
+            base_pe=base_pe,
+            base_anchor_fo=base_anchor_fo,
+            base_anchor_rva=base_anchor_rva,
+            base_anchor_section=base_section,
+            version_paths=version_paths,
+            mode=align_mode,
+            seed_bytes=seed_bytes,
+            seed_scan=seed_scan,
+            seed_allow_multi=seed_allow_multi,
+        )
     
     # Trace alignment events
     for aligned_anchor in aligned:
@@ -459,6 +592,10 @@ def run_synthesis_core(
                 "anchor_va": hex(anchor_va) if anchor_va is not None else None,
                 "anchor_mode": anchor_mode,
             },
+            "explicit_anchors": [
+                {"path": str(p), "anchor_rva": hex(rva)}
+                for p, rva in (version_anchors or [])
+            ],
             "align": {
                 "mode": align_mode,
                 "seed_bytes": seed_bytes,
@@ -528,7 +665,10 @@ def run_synth(args: Any) -> int:
     # Prepare version binaries list
     versions = unique_preserve_order([str(p) for p in (args.versions or [])])
     version_paths = [Path(p) for p in versions if Path(p) != args.base]
-    
+    explicit_version_anchors = _resolve_explicit_version_anchors(args)
+    if explicit_version_anchors:
+        version_paths = [p for p, _ in explicit_version_anchors]
+
     # Call core synthesis function
     try:
         out_obj = run_synthesis_core(
@@ -537,6 +677,7 @@ def run_synth(args: Any) -> int:
             anchor_fo=base_anchor_fo,
             anchor_va=base_anchor_va,
             version_binaries=version_paths,
+            version_anchors=explicit_version_anchors or None,
             align_mode=args.align,
             seed_bytes=args.seed_bytes,
             seed_scan=args.seed_scan,
