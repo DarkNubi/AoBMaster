@@ -14,7 +14,8 @@ from .xref_command import run_xref
 from .db_commands import run_db
 from .test_command import run_test
 from .analyze_command import run_analyze
-from .diagnose_command import run_diagnose
+from .auto_synth_command import run_auto_synth
+from .auto_recover_command import run_auto_recover
 
 
 def _add_common_output_args(p: argparse.ArgumentParser) -> None:
@@ -268,6 +269,52 @@ def build_parser() -> argparse.ArgumentParser:
     diagnose.add_argument("--db", type=Path, required=True, help="Database path.")
     diagnose.add_argument("--signature-id", type=str, required=True, help="Signature ID to diagnose.")
     _add_common_output_args(diagnose)
+    
+    # Auto-synth command (v2.1 feature - automated multi-anchor synthesis)
+    auto_synth = sub.add_parser("auto-synth", help="Automatically find and test multiple anchors for stable signatures (v2.1 feature).")
+    auto_synth.add_argument("--base", type=Path, required=True, help="Base PE x64 binary (.exe/.dll).")
+    auto_anchor = auto_synth.add_mutually_exclusive_group(required=True)
+    auto_anchor.add_argument("--anchor-rva", type=str, help="Center anchor RVA (hex).")
+    auto_anchor.add_argument("--anchor-fo", type=str, help="Center anchor file offset (hex).")
+    auto_anchor.add_argument("--anchor-va", type=str, help="Center anchor virtual address (hex).")
+    auto_synth.add_argument("--versions", type=Path, nargs="*", default=[], help="Additional version binaries for validation.")
+    auto_synth.add_argument("--byte-range", type=int, default=100, help="Byte range to search for anchors (±N bytes, default: 100).")
+    auto_synth.add_argument("--max-anchors", type=int, default=10, help="Maximum anchor candidates to try (default: 10).")
+    auto_synth.add_argument("--top-n", type=int, default=5, help="Number of top signatures to return (default: 5).")
+    # Reuse synthesis parameters
+    auto_synth.add_argument("--align", choices=["anchor-rva", "bytespan"], default="bytespan")
+    auto_synth.add_argument("--seed-bytes", type=int, default=32)
+    auto_synth.add_argument("--seed-scan", choices=["section", "module"], default="section")
+    auto_synth.add_argument("--context-before", type=int, default=8)
+    auto_synth.add_argument("--context-after", type=int, default=8)
+    auto_synth.add_argument("--max-context-insns", type=int, default=32)
+    auto_synth.add_argument("--context-variations", choices=["off", "on"], default="off")
+    auto_synth.add_argument("--profile", choices=["minimal", "default", "strict", "balanced", "aggressive", "stack-only", "global-only", "memory-heavy"], default="default")
+    auto_synth.add_argument("--min-insns", type=int, default=6)
+    auto_synth.add_argument("--max-insns", type=int, default=14)
+    _add_common_output_args(auto_synth)
+    
+    # Auto-recover command (v2.1 feature - automated signature recovery)
+    auto_recover = sub.add_parser("auto-recover", help="Automatically recover broken signatures in new versions (v2.1 feature).")
+    auto_recover.add_argument("--base", type=Path, required=True, help="Base (old) PE x64 binary where signature worked.")
+    auto_recover.add_argument("--target", type=Path, required=True, help="Target (new) PE x64 binary where signature broke.")
+    auto_recover_anchor = auto_recover.add_mutually_exclusive_group(required=True)
+    auto_recover_anchor.add_argument("--anchor-rva", type=str, help="Original anchor RVA from base (hex).")
+    auto_recover_anchor.add_argument("--anchor-fo", type=str, help="Original anchor file offset from base (hex).")
+    auto_recover_anchor.add_argument("--anchor-va", type=str, help="Original anchor virtual address from base (hex).")
+    auto_recover.add_argument("--signature", type=str, help="Original AoB signature (optional, for diagnostics).")
+    auto_recover.add_argument("--strategies", type=str, default=None, help="Comma-separated recovery strategies (default: anchor_shift,xref_search,function_boundary).")
+    auto_recover.add_argument("--byte-range", type=int, default=50, help="Byte range for anchor shift strategy (±N bytes, default: 50).")
+    auto_recover.add_argument("--max-results", type=int, default=5, help="Maximum recovery results to return (default: 5).")
+    # Reuse synthesis parameters
+    auto_recover.add_argument("--context-before", type=int, default=8)
+    auto_recover.add_argument("--context-after", type=int, default=8)
+    auto_recover.add_argument("--max-context-insns", type=int, default=32)
+    auto_recover.add_argument("--context-variations", choices=["off", "on"], default="off")
+    auto_recover.add_argument("--profile", choices=["minimal", "default", "strict", "balanced", "aggressive", "stack-only", "global-only", "memory-heavy"], default="default")
+    auto_recover.add_argument("--min-insns", type=int, default=6)
+    auto_recover.add_argument("--max-insns", type=int, default=14)
+    _add_common_output_args(auto_recover)
 
     return parser
 
@@ -299,6 +346,10 @@ def main(argv: list[str] | None = None) -> int:
             return run_analyze(args)
         if args.cmd == "diagnose":
             return run_diagnose(args)
+        if args.cmd == "auto-synth":
+            return run_auto_synth(args)
+        if args.cmd == "auto-recover":
+            return run_auto_recover(args)
         raise AoBMasterError(ExitCode.INVALID_ARGS, "invalid_args", f"Unknown command: {args.cmd}")
     except AoBMasterError as e:
         # Best-effort: return machine-readable JSON if requested.
