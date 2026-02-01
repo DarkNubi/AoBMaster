@@ -289,6 +289,16 @@ class SignatureDatabase:
         """
         self._db.import_from_json(Path(input_path))
 
+    def deprecate_signature(self, signature_id: str, reason: str) -> None:
+        """
+        Deprecate a signature in the database.
+
+        Args:
+            signature_id: Signature ID to deprecate
+            reason: Deprecation reason
+        """
+        self._db.deprecate_signature(signature_id, reason)
+
 
 class SignatureTester:
     """
