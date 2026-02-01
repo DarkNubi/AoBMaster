@@ -14,7 +14,7 @@ class ExitCode(IntEnum):
     INTERNAL_ERROR = 5
 
 
-@dataclass(frozen=True)
+@dataclass
 class AoBMasterError(Exception):
     code: ExitCode
     kind: str

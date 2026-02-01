@@ -1,0 +1,147 @@
+# Azure DevOps Pipeline for AoBMaster
+# Tests signatures against binary corpus in CI/CD
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.10'
+
+stages:
+  - stage: TestSignatures
+    displayName: 'Test Signatures'
+    jobs:
+      - job: TestJob
+        displayName: 'Test Signature Database'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+            displayName: 'Use Python $(pythonVersion)'
+
+          - script: |
+              python -m pip install --upgrade pip
+              pip install aobmaster
+            displayName: 'Install AoBMaster'
+
+          - script: |
+              # Test all signatures against binary corpus
+              aobmaster test --db signatures.db \
+                --corpus "binaries/*.exe" \
+                --parallel 4 \
+                --record \
+                --format json > test-results.json
+            displayName: 'Test Signatures'
+
+          - script: |
+              # Check results and fail if any signatures failed
+              python3 << 'EOF'
+              import json
+              import sys
+
+              with open('test-results.json') as f:
+                  results = json.load(f)
+
+              failed = results.get('summary', {}).get('failed', 0)
+              passed = results.get('summary', {}).get('passed', 0)
+              total = results.get('summary', {}).get('total', 0)
+
+              print(f"Signature Test Results:")
+              print(f"  Passed: {passed}/{total}")
+              print(f"  Failed: {failed}/{total}")
+
+              if failed > 0:
+                  print(f"\nFAILURE: {failed} signature(s) failed validation")
+                  # Print failed signatures
+                  for result in results.get('results', []):
+                      if not result.get('passed'):
+                          sig_id = result.get('signature_id')
+                          reason = result.get('failure_reason', 'Unknown')
+                          print(f"  - {sig_id}: {reason}")
+                  sys.exit(1)
+              else:
+                  print(f"\nSUCCESS: All signatures passed validation")
+              EOF
+            displayName: 'Validate Results'
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: 'test-results.json'
+              testRunTitle: 'Signature Tests'
+
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              pathToPublish: 'test-results.json'
+              artifactName: 'signature-test-results'
+            displayName: 'Archive Test Results'
+
+  - stage: AnalyzeSignatures
+    displayName: 'Analyze Signature Stability'
+    dependsOn: TestSignatures
+    jobs:
+      - job: AnalyzeJob
+        displayName: 'Temporal Analysis'
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '$(pythonVersion)'
+
+          - script: |
+              pip install aobmaster
+            displayName: 'Install AoBMaster'
+
+          - script: |
+              # Analyze signature stability
+              aobmaster analyze --db signatures.db \
+                --format json > analysis-results.json
+            displayName: 'Analyze Signatures'
+
+          - script: |
+              # Check for critical alerts
+              python3 << 'EOF'
+              import json
+              import sys
+
+              with open('analysis-results.json') as f:
+                  analyses = json.load(f)
+
+              critical_count = 0
+              warnings_count = 0
+
+              for analysis in analyses.get('analyses', []):
+                  alerts = analysis.get('alerts', [])
+                  for alert in alerts:
+                      if alert.get('severity') == 'critical':
+                          critical_count += 1
+                          sig_id = analysis.get('signature_id')
+                          msg = alert.get('message')
+                          print(f"CRITICAL: {sig_id} - {msg}")
+                      elif alert.get('severity') == 'warning':
+                          warnings_count += 1
+
+              if critical_count > 0:
+                  print(f"\n⚠️  {critical_count} critical alert(s) found")
+                  print("Review signature stability before deployment")
+                  sys.exit(1)
+              elif warnings_count > 0:
+                  print(f"\nℹ️  {warnings_count} warning(s) found (non-blocking)")
+              else:
+                  print("\n✓ All signatures are stable")
+              EOF
+            displayName: 'Check for Alerts'
+
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              pathToPublish: 'analysis-results.json'
+              artifactName: 'signature-analysis'
+            displayName: 'Archive Analysis Results'

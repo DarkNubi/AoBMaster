@@ -177,6 +177,7 @@ class SignatureDatabase:
     
     Usage:
         db = SignatureDatabase("signatures.db")
+        db.init()
         db.save_signature(
             signature_id="sig1",
             name="player_health",
@@ -193,12 +194,13 @@ class SignatureDatabase:
         Args:
             db_path: Path to SQLite database file
         """
+        from .database import SignatureDatabase as DB
         self.db_path = Path(db_path)
+        self._db = DB(self.db_path)
     
     def init(self) -> None:
         """Initialize database schema."""
-        from .database import init_database
-        init_database(str(self.db_path))
+        self._db.init_database()
     
     def save_signature(
         self,
@@ -226,19 +228,22 @@ class SignatureDatabase:
             metadata: Additional metadata (JSON-serializable dict)
             parent_id: Parent signature ID for families (v2 Phase 5)
         """
-        from .database import save_signature_to_db
-        save_signature_to_db(
-            db_path=str(self.db_path),
-            signature_id=signature_id,
+        from .database import SignatureRecord
+        from datetime import datetime, timezone
+        
+        record = SignatureRecord(
+            id=signature_id,
             name=name,
             pattern=pattern,
-            anchor_rva=anchor_rva,
-            binary_hash=binary_hash,
+            anchor_rva=int(anchor_rva, 16) if anchor_rva else 0,
+            binary_hash=binary_hash or "",
+            created_at=datetime.now(timezone.utc).isoformat(),
             author=author,
             version_range=version_range,
-            metadata_json=json.dumps(metadata) if metadata else None,
+            metadata=metadata or {},
             parent_id=parent_id,
         )
+        self._db.save_signature(record)
     
     def query_signature(self, signature_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -250,8 +255,8 @@ class SignatureDatabase:
         Returns:
             Signature dict or None if not found
         """
-        from .database import query_signature_by_id
-        return query_signature_by_id(str(self.db_path), signature_id)
+        record = self._db.get_signature(signature_id)
+        return record.to_dict() if record else None
     
     def list_signatures(self, filter_text: Optional[str] = None) -> List[Dict[str, Any]]:
         """
@@ -263,8 +268,8 @@ class SignatureDatabase:
         Returns:
             List of signature dicts
         """
-        from .database import list_all_signatures
-        return list_all_signatures(str(self.db_path), filter_text)
+        records = self._db.list_signatures(name_filter=filter_text)
+        return [r.to_dict() for r in records]
     
     def export_signatures(self, output_path: Union[str, Path]) -> None:
         """
@@ -273,8 +278,7 @@ class SignatureDatabase:
         Args:
             output_path: Path to output JSON file
         """
-        from .database import export_database
-        export_database(str(self.db_path), str(output_path))
+        self._db.export_to_json(Path(output_path))
     
     def import_signatures(self, input_path: Union[str, Path]) -> None:
         """
@@ -283,8 +287,7 @@ class SignatureDatabase:
         Args:
             input_path: Path to input JSON file
         """
-        from .database import import_database
-        import_database(str(self.db_path), str(input_path))
+        self._db.import_from_json(Path(input_path))
 
 
 class SignatureTester:
@@ -304,7 +307,9 @@ class SignatureTester:
         Args:
             db_path: Path to signature database
         """
+        from .database import SignatureDatabase as DB
         self.db_path = Path(db_path)
+        self._db = DB(self.db_path)
     
     def test_signature(
         self,
@@ -323,13 +328,38 @@ class SignatureTester:
         Returns:
             Test result dict with 'passed', 'match_count', 'failure_reason'
         """
-        from .test_command import test_single_signature
-        return test_single_signature(
-            db_path=str(self.db_path),
+        from .test_command import _test_signature_against_binary
+        
+        # Get signature from database
+        sig_record = self._db.get_signature(signature_id)
+        if not sig_record:
+            return {
+                "signature_id": signature_id,
+                "binary_path": str(binary_path),
+                "passed": False,
+                "match_count": 0,
+                "failure_reason": f"Signature '{signature_id}' not found in database"
+            }
+        
+        # Test signature
+        result = _test_signature_against_binary(
             signature_id=signature_id,
-            binary_path=str(binary_path),
-            record=record
+            pattern_string=sig_record.pattern,
+            binary_path=Path(binary_path),
+            expected_unique=True
         )
+        
+        # Record result if requested
+        if record:
+            self._db.record_test_result(
+                signature_id=signature_id,
+                binary_path=str(binary_path),
+                binary_hash=result["binary_hash"],
+                passed=result["passed"],
+                failure_reason=result.get("failure_reason")
+            )
+        
+        return result
     
     def test_all(
         self,
@@ -350,14 +380,50 @@ class SignatureTester:
         Returns:
             Test results dict with 'summary' and 'results' lists
         """
-        from .test_command import test_corpus
-        return test_corpus(
-            db_path=str(self.db_path),
-            corpus_pattern=corpus_pattern,
-            signature_id=signature_id,
-            parallel=parallel,
-            record=record
-        )
+        from pathlib import Path
+        import glob
+        
+        # Get signatures to test
+        if signature_id:
+            sig_record = self._db.get_signature(signature_id)
+            if not sig_record:
+                return {
+                    "summary": {"passed": 0, "failed": 1, "total": 1},
+                    "results": [{
+                        "signature_id": signature_id,
+                        "error": f"Signature '{signature_id}' not found"
+                    }]
+                }
+            signatures = [sig_record]
+        else:
+            signatures = self._db.list_signatures()
+        
+        # Get binaries from corpus
+        binaries = list(Path().glob(corpus_pattern))
+        
+        # Test all combinations
+        results = []
+        for sig_record in signatures:
+            for binary_path in binaries:
+                result = self.test_signature(
+                    signature_id=sig_record.id,
+                    binary_path=binary_path,
+                    record=record
+                )
+                results.append(result)
+        
+        # Compute summary
+        passed = sum(1 for r in results if r.get("passed"))
+        failed = len(results) - passed
+        
+        return {
+            "summary": {
+                "passed": passed,
+                "failed": failed,
+                "total": len(results)
+            },
+            "results": results
+        }
 
 
 class TemporalAnalyzer:
@@ -395,7 +461,13 @@ class TemporalAnalyzer:
             - recommendation: Actionable advice
         """
         from .temporal import analyze_signature_temporal
-        return analyze_signature_temporal(str(self.db_path), signature_id)
+        from .database import SignatureDatabase as DB
+        
+        db = DB(self.db_path)
+        conn = db._connect()
+        
+        result = analyze_signature_temporal(conn, signature_id)
+        return result.to_dict()
     
     def analyze_all(self) -> List[Dict[str, Any]]:
         """
@@ -404,61 +476,76 @@ class TemporalAnalyzer:
         Returns:
             List of analysis dicts (one per signature)
         """
-        from .temporal import analyze_all_signatures
-        return analyze_all_signatures(str(self.db_path))
+        from .database import SignatureDatabase as DB
+        
+        db = DB(self.db_path)
+        signatures = db.list_signatures()
+        
+        results = []
+        for sig in signatures:
+            try:
+                analysis = self.analyze_signature(sig.id)
+                results.append(analysis)
+            except Exception as e:
+                # Skip signatures that can't be analyzed
+                results.append({
+                    "signature_id": sig.id,
+                    "error": str(e)
+                })
+        
+        return results
 
 
 # Internal function (called by SDK)
 def _run_synthesis(config: SynthesisConfig) -> SynthesisResult:
     """
-    Internal synthesis function. Calls CLI argument parser and run_synth.
+    Internal synthesis function that bridges SDK to core logic.
     
-    This is a bridge between SDK API and CLI implementation.
-    In a future refactor, CLI would call SDK directly (not vice versa).
+    This function calls run_synthesis_core() and converts the result
+    to a SynthesisResult object.
     """
-    # For now, this is a placeholder that would call the actual synth logic
-    # In production, we'd refactor synth.py to be library-first
-    
     # Import here to avoid circular dependency
-    from .synth import run_synth
-    from argparse import Namespace
+    from .synth import run_synthesis_core
     
-    # Convert config to argparse Namespace (CLI format)
-    args = Namespace(
-        base=config.base_binary,
-        anchor_rva=config.anchor_rva,
-        anchor_fo=config.anchor_fo,
-        anchor_va=config.anchor_va,
-        versions=config.version_binaries,
-        align=config.align_mode,
+    # Call core synthesis function
+    result_dict = run_synthesis_core(
+        base_binary=Path(config.base_binary),
+        anchor_rva=int(config.anchor_rva, 16) if config.anchor_rva else None,
+        anchor_fo=int(config.anchor_fo, 16) if config.anchor_fo else None,
+        anchor_va=int(config.anchor_va, 16) if config.anchor_va else None,
+        version_binaries=[Path(p) for p in config.version_binaries] if config.version_binaries else None,
+        align_mode=config.align_mode,
         seed_bytes=config.seed_bytes,
         seed_scan=config.seed_scan,
-        seed_allow_multi="true" if config.seed_allow_multi else "false",
+        seed_allow_multi=config.seed_allow_multi,
         context_before=config.context_before,
         context_after=config.context_after,
         max_context_insns=config.max_context_insns,
-        context_variations="on" if config.context_variations else "off",
+        context_variations=config.context_variations,
         profile=config.profile,
         min_insns=config.min_insns,
         max_insns=config.max_insns,
-        top_n=config.top_n,
-        require_unique="true" if config.require_unique else "false",
-        require_present_all="true" if config.require_present_all else "false",
-        scan_range=config.scan_range,
+        require_unique=config.require_unique,
+        require_present_all=config.require_present_all,
+        scan_range_base=config.scan_range,
+        scan_range_versions=config.scan_range,
         explain=config.explain,
         anchor_mode=config.anchor_mode,
         structural_min_confidence=config.structural_min_confidence,
         anchor_shift=config.anchor_shift,
-        format="json",  # Always JSON for SDK
     )
     
-    # Run synthesis (would need to capture JSON output, not write to stdout)
-    # This is a simplification - in production we'd refactor synth.py
-    # to return data instead of printing
-    
-    # For now, raise NotImplementedError to indicate refactoring needed
-    raise NotImplementedError(
-        "SDK is currently a placeholder. To use SDK functionality, "
-        "synth.py needs to be refactored to return data instead of printing. "
-        "This is a v2.1 task. For now, use CLI directly."
+    # Convert dict to SynthesisResult
+    return SynthesisResult(
+        ok=result_dict.get("ok", False),
+        version=result_dict.get("version", "2.0.0"),
+        candidates=result_dict.get("candidates", []),
+        warnings=result_dict.get("warnings", []),
+        errors=result_dict.get("errors", []),
+        anchor=result_dict.get("anchor", {}),
+        alignment=result_dict.get("alignment", []),
+        hashes=result_dict.get("hashes", {}),
+        trace=result_dict.get("trace"),
+        signature_ir=result_dict.get("signature_ir"),
+        structural_anchor=result_dict.get("structural_anchor"),
     )
