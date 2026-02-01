@@ -228,13 +228,17 @@ def run_recovery_strategies(
         target_pe: Target binary where signature broke
         original_anchor_rva: Original anchor RVA from base binary
         strategies: List of strategy names to run (None = all)
+                   Note: xref_search is currently unimplemented and returns placeholder
         byte_range: Byte range for anchor shift strategy
     
     Returns:
         List of recovery results sorted by confidence
     """
     if strategies is None:
-        strategies = ["anchor_shift", "xref_search", "function_boundary"]
+        # Default strategies: anchor_shift is fast and reliable
+        # function_boundary is slower but handles larger code changes
+        # xref_search is unimplemented placeholder
+        strategies = ["anchor_shift", "function_boundary"]
     
     all_results: list[RecoveryResult] = []
     

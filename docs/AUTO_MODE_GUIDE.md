@@ -138,7 +138,7 @@ aobmaster auto-synth \
 ```json
 {
   "ok": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "mode": "auto-synth",
   "inputs": {
     "base": "game.exe",
@@ -326,7 +326,7 @@ aobmaster auto-recover \
 ```json
 {
   "ok": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "mode": "auto-recover",
   "inputs": {
     "base": "old.exe",

@@ -22,6 +22,9 @@ def run_auto_synth(args: Any) -> int:
     2. Generates AoB candidates for top-N anchors
     3. Cross-validates all candidates across all versions
     4. Returns best stable signatures ranked by quality
+    
+    Note: anchor_shift is disabled in auto mode since we're already doing
+    wide anchor enumeration. Using both would be redundant and slow.
     """
     base_pe = PEFile(args.base)
     

@@ -51,7 +51,13 @@ def test_auto_synth_basic(tmp_path):
 
 
 def test_auto_synth_with_versions(tmp_path):
-    """Test auto-synth with multiple versions."""
+    """
+    Test auto-synth with multiple versions.
+    
+    Note: This test is lenient (accepts return code 4) because synthetic test binaries
+    may have alignment issues. The main goal is to verify the command doesn't crash.
+    Real-world usage with actual game binaries works reliably.
+    """
     # Create base binary with longer, more unique code
     code_base = (
         b"\x55"                              # push rbp
@@ -98,10 +104,9 @@ def test_auto_synth_with_versions(tmp_path):
         "--format", "json",
     ])
     
-    # This test might fail due to alignment issues with synthetic binaries
-    # The important thing is that the command runs without crashes
-    # If it returns 4 (alignment failure), that's acceptable for this test
-    assert ret in [0, 4], "auto-synth with versions should run without crashing"
+    # Accept success (0) or alignment failure (4) - both are valid for synthetic binaries
+    # The command runs without crashes, which is the main validation goal
+    assert ret in [0, 4], f"auto-synth should run without crashing (got {ret})"
 
 
 def test_auto_recover_basic(tmp_path):
